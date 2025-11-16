@@ -157,9 +157,7 @@ class FrameWorker(threading.Thread):
                     continue
                 except Exception as e:
                     # An error happened *during* processing (process_and_emit_task)
-                    print(
-                        f"[ERROR] Error in {self.name} (frame {self.frame_number}): {e}"
-                    )
+                    print(f"[ERROR] Error in {self.name} (frame {self.frame_number}): {e}")
                     traceback.print_exc()
                     # We still need to mark the task as done in 'finally'
 
@@ -571,7 +569,7 @@ class FrameWorker(threading.Thread):
                 )
                 kps_all_for_editor_on_crop = (
                     kps_all_for_editor_list[0]
-                    if kps_all_for_editor_list.shape[0] > 0
+                    if len(kps_all_for_editor_list) > 0
                     else None
                 )
                 if (
@@ -3292,44 +3290,45 @@ class FrameWorker(threading.Thread):
             )
 
             # --- VARIABLE DEFINITION (Original Placement) ---
-            driving_multiplier_eyes = parameters[
-                "FaceExpressionFriendlyFactorEyesDecimalSlider"
-            ]  # Eyes slider
-            driving_multiplier_lips = parameters[
-                "FaceExpressionFriendlyFactorLipsDecimalSlider"
-            ]  # Lips slider
+            driving_multiplier_eyes = parameters.get(
+                "FaceExpressionFriendlyFactorEyesDecimalSlider", 1.0 
+            )  # Eyes slider
+            driving_multiplier_lips = parameters.get(
+                "FaceExpressionFriendlyFactorLipsDecimalSlider", 1.0
+            )  # Lips slider
 
-            flag_activate_eyes = parameters["FaceExpressionEyesToggle"]
-            flag_eye_retargeting = parameters[
-                "FaceExpressionRetargetingEyesBothEnableToggle"
-            ]
-            eye_retargeting_multiplier = parameters[
-                "FaceExpressionRetargetingEyesMultiplierBothDecimalSlider"
-            ]
-            flag_activate_lips = parameters["FaceExpressionLipsToggle"]
-            flag_normalize_lip = parameters[
-                "FaceExpressionNormalizeLipsBothEnableToggle"
-            ]
-            lip_normalize_threshold = parameters[
-                "FaceExpressionNormalizeLipsThresholdBothDecimalSlider"
-            ]
-            flag_normalize_eyes = parameters[
-                "FaceExpressionNormalizeEyesBothEnableToggle"
-            ]
-            eyes_normalize_threshold = parameters[
-                "FaceExpressionNormalizeEyesThresholdBothDecimalSlider"
-            ]
-            flag_lip_retargeting = parameters[
-                "FaceExpressionRetargetingLipsBothEnableToggle"
-            ]
-            lip_retargeting_multiplier = parameters[
-                "FaceExpressionRetargetingLipsMultiplierBothDecimalSlider"
-            ]
-            eyes_normalize_max = parameters[
-                "FaceExpressionNormalizeEyesMaxBothDecimalSlider"
-            ]
-            flag_relative_motion_eyes = parameters["FaceExpressionRelativeEyesToggle"]
-            flag_relative_motion_lips = parameters["FaceExpressionRelativeLipsToggle"]
+            flag_activate_eyes = parameters.get("FaceExpressionEyesToggle", False)
+            flag_eye_retargeting = parameters.get(
+                "FaceExpressionRetargetingEyesBothEnableToggle", False
+            )
+            eye_retargeting_multiplier = parameters.get(
+                "FaceExpressionRetargetingEyesMultiplierBothDecimalSlider", 1.0
+            )
+            flag_activate_lips = parameters.get("FaceExpressionLipsToggle", False)
+            flag_normalize_lip = parameters.get(
+                "FaceExpressionNormalizeLipsBothEnableToggle", False
+            )
+            lip_normalize_threshold = parameters.get(
+                "FaceExpressionNormalizeLipsThresholdBothDecimalSlider", 0.03
+            )
+            flag_normalize_eyes = parameters.get(
+                "FaceExpressionNormalizeEyesBothEnableToggle", True
+            )
+            eyes_normalize_threshold = parameters.get(
+                "FaceExpressionNormalizeEyesThresholdBothDecimalSlider", 0.40
+            )
+            flag_lip_retargeting = parameters.get(
+                "FaceExpressionRetargetingLipsBothEnableToggle", False
+            )
+            lip_retargeting_multiplier = parameters.get(
+                "FaceExpressionRetargetingLipsMultiplierBothDecimalSlider", 1.0
+            )
+            eyes_normalize_max = parameters.get(
+                "FaceExpressionNormalizeEyesMaxBothDecimalSlider", 0.50
+            )
+            flag_relative_motion_eyes = parameters.get("FaceExpressionRelativeEyesToggle", False)
+            flag_relative_motion_lips = parameters.get("FaceExpressionRelativeLipsToggle", False)
+            face_editor_type =  parameters.get("FaceEditorTypeSelection", "Human-Face")
 
             lip_delta_before_animation = None
 
@@ -3351,8 +3350,8 @@ class FrameWorker(threading.Thread):
                 target,
                 source_lmk,
                 dsize=512,
-                scale=parameters["FaceExpressionCropScaleBothDecimalSlider"],
-                vy_ratio=parameters["FaceExpressionVYRatioBothDecimalSlider"],
+                scale=parameters.get("FaceExpressionCropScaleBothDecimalSlider", 2.3),
+                vy_ratio=parameters.get("FaceExpressionVYRatioBothDecimalSlider", -0.125),
                 interpolation=v2.InterpolationMode.BILINEAR,
             )
 
@@ -3442,7 +3441,7 @@ class FrameWorker(threading.Thread):
 
             if flag_activate_eyes and not flag_eye_retargeting:  # Use flags
                 x_d_i_new_eyes = self.models_processor.lp_stitching(
-                    x_s, x_d_i_new_eyes, parameters["FaceEditorTypeSelection"]
+                    x_s, x_d_i_new_eyes, face_editor_type
                 )
 
             elif flag_activate_eyes and flag_eye_retargeting:  # Use flags
@@ -3464,7 +3463,7 @@ class FrameWorker(threading.Thread):
                         eyes_delta = self.models_processor.lp_retarget_eye(
                             x_s,
                             combined_eye_ratio_tensor,
-                            parameters["FaceEditorTypeSelection"],
+                            face_editor_type,
                         )
                     else:
                         combined_eye_ratio_tensor = (
@@ -3473,7 +3472,7 @@ class FrameWorker(threading.Thread):
                         eyes_delta = self.models_processor.lp_retarget_eye(
                             x_s,
                             combined_eye_ratio_tensor,
-                            parameters["FaceEditorTypeSelection"],
+                            face_editor_type,
                         )
                 if flag_relative_motion_eyes:  # Use flag_relative_motion_eyes
                     x_d_i_new_eyes = x_s + (eyes_delta if eyes_delta is not None else 0)
@@ -3482,7 +3481,7 @@ class FrameWorker(threading.Thread):
                         eyes_delta if eyes_delta is not None else 0
                     )
                 x_d_i_new_eyes = self.models_processor.lp_stitching(
-                    x_s, x_d_i_new_eyes, parameters["FaceEditorTypeSelection"]
+                    x_s, x_d_i_new_eyes, face_editor_type
                 )
 
             if flag_activate_eyes:  # Use flag_activate_eyes
@@ -3524,13 +3523,13 @@ class FrameWorker(threading.Thread):
                 ):  # Use flag_normalize_lip
                     x_d_i_new_lips = (
                         self.models_processor.lp_stitching(
-                            x_s, x_d_i_new_lips, parameters["FaceEditorTypeSelection"]
+                            x_s, x_d_i_new_lips, face_editor_type
                         )
                         + lip_delta_before_animation
                     )
                 else:
                     x_d_i_new_lips = self.models_processor.lp_stitching(
-                        x_s, x_d_i_new_lips, parameters["FaceEditorTypeSelection"]
+                        x_s, x_d_i_new_lips, face_editor_type
                     )
 
             elif flag_activate_lips and flag_lip_retargeting:  # Use flags
@@ -3548,7 +3547,7 @@ class FrameWorker(threading.Thread):
                     lip_delta = self.models_processor.lp_retarget_lip(
                         x_s,
                         combined_lip_ratio_tensor,
-                        parameters["FaceEditorTypeSelection"],
+                        face_editor_type,
                     )
                 if flag_relative_motion_lips:  # Use flag_relative_motion_lips
                     x_d_i_new_lips = x_s + (lip_delta if lip_delta is not None else 0)
@@ -3557,7 +3556,7 @@ class FrameWorker(threading.Thread):
                         lip_delta if lip_delta is not None else 0
                     )
                 x_d_i_new_lips = self.models_processor.lp_stitching(
-                    x_s, x_d_i_new_lips, parameters["FaceEditorTypeSelection"]
+                    x_s, x_d_i_new_lips, face_editor_type
                 )
 
             if flag_activate_lips:  # Use flag_activate_lips
@@ -3575,7 +3574,7 @@ class FrameWorker(threading.Thread):
 
             # ASYNC CALL N (Last GPU Inference): Warp Decode (Queued)
             out = self.models_processor.lp_warp_decode(
-                f_s, x_s, x_d_i_new, parameters["FaceEditorTypeSelection"]
+                f_s, x_s, x_d_i_new, face_editor_type
             )
             out = torch.squeeze(out)
             out = torch.clamp(out, 0, 1)
