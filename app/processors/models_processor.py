@@ -191,7 +191,7 @@ class ModelsProcessor(QtCore.QObject):
         super().__init__()
         self.main_window = main_window
         self.K = K  # Assign the module-level K to an instance attribute
-        self.provider_name = "TensorRT"
+        self.provider_name = "CUDA"
         self.internal_deep_copied_kv_map: Dict[str, Dict[str, torch.Tensor]] | None = (
             None
         )
@@ -219,7 +219,6 @@ class ModelsProcessor(QtCore.QObject):
         # have not had their engine built (lazy build).
         self.models_pending_build = set()
         self.providers = [
-            ("TensorrtExecutionProvider", self.trt_ep_options),
             ("CUDAExecutionProvider"),
             ("CPUExecutionProvider"),
         ]
