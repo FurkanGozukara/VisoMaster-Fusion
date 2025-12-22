@@ -1,295 +1,201 @@
 # VisoMaster Fusion
 
+# 1-Click installers at : https://www.patreon.com/posts/121570322
+
 ### Visomaster Fusion is a powerful yet easy-to-use tool for face swapping and editing in images and videos. It utilizes AI to produce natural-looking results with minimal effort, making it ideal for both casual users and professionals.
 
-This version integrates major features developed by the community to create a single, enhanced application. It is built upon the incredible work of the original VisoMaster developers, **@argenspin** and **@Alucard24**.
+***
 
----
-<img src=".github/screenshot.png" height="auto"/>
+# VisoMaster Fusion & Automatic Installer
+**The Most Advanced 0-Shot Face Swap / Deep Fake APP - State of the Art**
 
-## Fusion Features - Changelog v1.0.0
+**Author:** [SECourses](https://www.patreon.com/SECourses)  
+**Latest Update:** 22 December 2025  
+**Platform:** Windows (Portable) & Massed Compute (Cloud)
 
-VisoMaster Fusion includes all the great features of the original plus major enhancements from community mods. Many thanks to GlatOs, Hans, Raven, Tenka, UnloadingVirus, Nyny, forgotten others and of course the original authors, Argenspin and Alucard24.
+## 📂 Latest Downloads
+*   **Recommended (Newer):** `VisoMaster_Fusion_v2.zip`
+*   **Classic Version:** `VisoMaster_v8.zip`
 
-- User Interface :
-	- Version is now : VisoMaster - Fusion - 1.0.0
-	- Separate widgets panels for 'Target Videos/Images', 'Input Faces', 'Jobs' with each a hide/show toggle. 'Faces' panel toggle puts primary function on the 'Control Options' tabs.
-	- Keep track of filters for 'Target Videos/Images'.
-	- Added Send to Trash and Open File Location to Media 'Target Videos/Images' and 'Input Faces'.
-	- Added new Themes : True-Dark, Solarized-Dark, Solarized-Light, Dracula, Nord, Gruvbox.
-	- Open Output folder button.
-	- Improved Parameters and Controls sorting and placement in 'Control Options' tabs with added categories.
-	- Added 'Help' Menu with two help panels.
-	- Added complete 'Embedding Editor'.
-	- Save and restore 'Main Window' and 'Widgets' states within the workspace .json.
-	- Updated and complete Start_Portable.bat file with new Launcher functions.
-
-- Models :
-	- Added 512 resolution for InstyleSwapper256 model A, B and C.
-	- Added VGG_Combo_relu3 model for Differencing and Texture Transfer.
-	- Added GFPGAN-1024 restorer model.
-	- Added REF-LDM model as Denoiser.
-
-- Improvements :
-	- Inswapper128 Auto resolution.
-	- Pre Swap Sharpness slider.
-	- Face parser option to run at Pipeline End and Mouth Inside toggle to parse only the inside area of the mouth.
-	- New Differencing method.
-	- Improved AutoColor Transfer with added function for a secondary pass at Pipeline end.
-	- Face Editor Pipeline position selection for added control.
-	- Face Restorers 'Auto Restore' function to automaticaly adjust Blend value and sharpness and Face Restorer 2 at end toggle.
-	- Face Expression Restorer rework to separate the Eyes and Lips options for fine tuning, added Normalize Eyes (to prevent 'fish eyes'), added Relative position toggle and added Pipeline position selection.
-
-- New Features :
-	- VR video support.
-	- Job Manager.
-	- Embedding Editor.
-	- Images Batch Processing.
-	- Xseg Mouth masks for added masking control of mouth area.
-	- Mask View selection for 'Swap Mask', 'Differencing' and 'Texture Transfer'.
-	- Transfer Texture function for added realism with mask manipulation for finetuning.
-	- MPEG compression artifacts simulation.
-	- REF-LDM Denoiser with included K/V map extraction function, Single Step and Full Restore modes, three Pipeline passes options.
-	- Keep Controls Active toggle during recording option.
-	- Audio function during playback with Volume and Delay sliders.
-	- Playback Buffering option.
-	- Playback Loop option.
-	- Video Recording options, Frame Resize to 1920*1080, Open Output folder after recording, HDR Encoding (CPU), FFMPEG controls.
-	- Segment recording with added Start/Stop position Markers.
-	- Swap Input Face only once function to prevent false face swapping with multiple similar faces on scene.
-	- Auto Save warkspace.
-	- Auto Load Last Workspace.
-	- Experimental settings.
-	- Complet Presets function to save and apply per face parameters and global controls.
-
-- Performance :
-	- Reviewed memory usage with new and improved model loading and unloading to only keep necessary models in memory.
-	- Improved Expression Restorer / Face Editor with async cuda threads for multithread usage.
-	- Optimized Detection method using GPU instead of CPU.
-	- No recording speed limit.
-
-- Fixes :
-	- Corrected many typos.
-	- Unified requirements.txt file.
-	- Keep Markers visible after VRAM clear.
-	- Fixed VM crashes from ONNXRUNTIME Engine Cache creation by using a separate ONNX PROBE process that allows multiple retrys if it fails.
-	- Corrected and optimized python code with pre-commit, and AI passes for added and translated comments.
-	- Lots of bug fixes during implementation of new features and changes.
-	- Added more relevant Debugging lines in console for better understanding what is happening.
-	- Improved checks for file paths or general function calls with try...except.
+*(Note: Extract and overwrite previous files if updating)*
 
 ---
 
-## Detailed Feature List
+## 📅 Update Log & Critical Notes
 
-### 🔄 **Face Swap**
--   Supports multiple face swapper models
--   Compatible with DeepFaceLab trained models (DFM)
--   Advanced multi-face swapping with improved masking (Occlusion/XSeg integration for mouth and face)
--   "Swap only best match" logic for cleaner results in multi-face scenes
--   Works with all popular face detectors & landmark detectors
--   Expression Restorer: Transfers original expressions to the swapped face
+### 22 December 2025 Update
+*   **New Downloader:** `Windows_Fix_Resume_Model_Download.bat` added. It will auto-hash verify and ultra-fast download all **64 models** used by VisoMaster.
+*   **Portable Launcher:** `Windows_Start_Portable.bat` now uses the ultra-advanced, SHA256 verified downloader (replacing the old undependable one).
+*   **Corrupt Model Fixes:** Fixed `refldm.ckpt` in the repo. The following models are now included in the auto-downloader:
+    *   `refldm.ckpt` (Used at denoiser)
+    *   `vqgan.ckpt`
+    *   `ref_ldm_vae_decoder.onnx`
+    *   `ref_ldm_vae_encoder.onnx`
+    *   `vgg_combo_relu3_3_relu3_1.onnx`
 
-### ✨ **Restoration & Enhancement**
--   **Face Restoration**: Supports popular upscaling models, including the newly added **GFPGAN-1024**.
--   **ReF-LDM Denoiser**: A powerful reference-based U-Net denoiser to clean up and enhance face quality, with options to apply before or after other restorers.
--   **Advanced Texture Transfer**: Multiple modes for transferring texture details.
--   **AutoColor Transfer**: Improved color matching with a "Test_Mask" feature for more precise and stable results.
--   **Auto-Restore Blend**: Intelligently blends restored faces back into the original scene.
+### 18 December 2025 Update (Fusion Launch)
+*   **Portable Mode:** Added `Windows_Start_Portable.bat`. Installs everything into a `portable-files` folder. **No Python or libraries required** on the host machine.
+*   **GPU Support:** Supports **All GPUs** from RTX 1000 series to 5000 series.
+*   **Environment:** Installs with **Torch 2.9** and **CUDA 12.8**.
+*   **Default Device:** Set to **CUDA** by default (works faster/better than TensorRT).
+*   **Speed:** Model downloader is now ~10x faster using `uv` package installing with pip.
 
-### 🎬 **Job Manager & Batch Processing**
--   **Dockable UI**: Manage all your jobs from a simple, integrated widget.
--   **Save/Load Jobs**: Save your entire workspace state (models, settings, faces) as a job file.
--   **Automated Batch Processing**: Queue up multiple jobs and process them all with a single click.
--   **Segmented Recording**: Set multiple start and end markers to render and combine various sections of a video into one final output.
--   **Custom File Naming**: Optionally use the job name for the output video file.
-
-### 🚀 **Other Powerful Features**
--   **VR180 Mode**: Process and swap faces in hemispherical VR videos.
--   **Virtual Camera Streaming**: Send processed frames to OBS, Zoom, etc.
--   **Live Playback**: See processed video in real-time before saving.
--   **Face Embeddings**: Use multiple source faces for better accuracy & similarity.
--   **Live Swapping via Webcam**: Swap your face in real-time.
--   **Improved User Interface**: Pan the preview window by holding the right mouse button, batch select input faces with the Shift key, and choose from several new themes.
--   **Video Markers**: Adjust settings per frame for precise results.
--   **TensorRT Support**: Leverages supported GPUs for ultra-fast processing.
+### 24 September 2025 Update
+*   **Cloud Support:** Supports Cloud GPUs (e.g., Massed Compute) with Torch 2.8, CUDA 12.9, and cuDNN 9.12.
+*   **Comparison:** Developer recommends FaceFusion as #1, but VisoMaster Fusion provides a different, feature-rich desktop experience.
 
 ---
 
-### **Prerequisites**
-- Portable Version: No pre-requirements - Minimum Nvidia driver version: >=576.57
-- Non-Portable Version:
-    -   **Git** ([Download](https://git-scm.com/downloads))
-    -   **Miniconda** ([Download](https://www.anaconda.com/download))
-        <br> or
-    -   **uv** ([Installation choices])(https://docs.astral.sh/uv/getting-started/installation/)
+## 📊 Major Features: VisoMaster-Fusion
 
-## **Installation Guide (VisoMaster-Fusion)**
+### 1. Job Manager & Batch Processing
+*   **Complete Management:** Save, load, and manage multiple processing jobs.
+*   **Automated Batch:** Queue multiple jobs and process automatically (Background processing supported).
+*   **Workspace Persistence:** Saves entire state (models, settings, faces, markers).
+*   **Validation:** Checks file existence and data integrity before loading.
+*   **Master Assets:** Share common assets across multiple jobs.
+*   **Custom Naming:** Use job names for output files.
+*   **Segmented Recording:** Set multiple start/end markers for video sections and combine output.
 
-### **Portable version**
+### 2. Advanced Embedding Editor
+*   **Standalone Editor:** Drag-and-drop interface.
+*   **Formats:** Load/save/convert `.npy`, `.npz`, `.pkl`, `.safetensors`.
+*   **Visuals:** Thumbnail previews, natural sorting, search/filter by name.
+*   **Edit Tools:** Batch operations (select multiple, copy/paste, delete), Context menu (rename), Undo/Redo system.
 
-Download only the Run_Portable.bat file from this repo (you don't need to clone the whole repo) from link below and put it in a new directory were you want to run VisoMaster from. Then just execute the bat file to run VisoMaster. Portable dependencies will be installed on the first run to portable-files directory.
-- [Download - Start_Portable.bat](Start_Portable.bat)
+### 3. VR180 Video Support
+*   **Formats:** Hemispherical VR processing (VR180).
+*   **Converters:** `Equirec2Perspec_vr.py` and `Perspec2Equirec_vr.py` included in `vr_utils.py`.
+*   **Processing:** Separate Left/Right eye processing.
+*   **Stitching:** Advanced feathering and mask blending for seamless results.
 
-You don't need any other steps from below for the portable version. Always start visomaster with Start_Portable.bat
+### 4. ReF-LDM Denoiser (Reference Latent Diffusion)
+*   **Core:** Extracts Key/Value tensors from reference images (with color matching support).
+*   **Modes:**
+    *   **Single Step (Fast):** Configurable timestep.
+    *   **Full Restore (DDIM):** High-quality restoration with multiple steps.
+*   **Pipeline Position:** Apply Before Restorers, After First Restorer, or After All Restorers.
+*   **Controls:** Exclusive Reference Path toggle, Base Seed, CFG Scale, Timestep, DDIM steps.
 
-### **Non-Portable - Installation Steps**
+### 5. Preset System
+*   **Dual Files:** Separate parameter files and control files (`_ctl.json`).
+*   **UI:** Preset List Widget (browser), context menu to rename/delete, double-click to apply.
 
-**1. Clone the Repository**
-Open a terminal or command prompt and run:
-```sh
-git clone <URL_TO_YOUR_VISOMASTER_FUSION_REPO>
-```
-```sh
-cd VisoMaster
-```
-```sh
-git checkout fusion
-```
+### 6. Enhanced Models
+*   **Face Swappers:**
+    *   `InStyleSwapper256` Version A, B, and C (Support 512 resolution).
+    *   Auto Resolution Detection for `Inswapper128`.
+*   **Restorer:** `GFPGAN-1024` (High-res 1024px restoration).
+*   **Texture:** `VGG_Combo_relu3` (Combined VGG for differencing/texture transfer).
 
-**2. Create and Activate a python Environment (Skip if you already have one)**
+### 7. Advanced UI & Themes
+*   **10 Themes:** True-Dark, Solarized-Dark, Solarized-Light, Dracula, Nord, Gruvbox, Monokai, etc.
+*   **Panels:** Independent hide/show toggles for 'Target Videos', 'Input Faces', 'Jobs'.
+*   **File Management:** "Send to Trash" (via `send2trash`), "Open File Location", Filter tracking.
+*   **Help:** Integrated Help Menu with two separate documentation panels.
 
+### 8. Advanced Launcher
+*   **Tools:** Dedicated UI, built-in Git operations, automatic environment setup.
+*   **Config:** `cfgtools.py` for settings management.
 
-#### In case you like to use "anaconda"
+### 9. Face Processing
+*   **XSeg:** Advanced mouth area masking, integration with DFL XSeg.
+*   **Expression Restorer:** Separate Eye/Lip controls, "Normalize Eyes" (prevents fish-eye), Relative Position toggle.
+*   **Face Parser:** Can run at pipeline end; "Mouth Inside" toggle.
+*   **Face Restorer:** Auto-adjust blend values, Sharpness auto-adjust, **Face Restorer 2** (secondary pass).
+*   **Texture Transfer:** Advanced mapping with mask manipulation.
+*   **Mask View:** Real-time preview for Swap Mask, Differencing, and Texture Transfer.
 
-```sh
-conda create -n visomaster python=3.11 -y
-```
-```sh
-conda activate visomaster
-```
-```sh
-pip install uv
-```
+### 10. Video Processing
+*   **Audio:** Playback during preview, Volume slider, Delay slider (sync).
+*   **Playback:** Buffering and Loop options.
+*   **Recording:**
+    *   Frame resize to standard 1920x1080.
+    *   HDR Encoding (CPU).
+    *   Direct FFMPEG parameter access.
+    *   No speed limit; UI remains active during recording.
+    *   Auto-open output folder.
 
-### In case you like to use "uv" directly
+### 11. Advanced Swap
+*   **Control:** "Swap Input Face Once" (prevents false swaps on similar faces).
+*   **Sharpness:** Pre-swap sharpness slider.
+*   **Color Transfer:** Improved AutoColor, Secondary Pass at pipeline end, `Test_Mask` feature.
+*   **Face Editor:** Selectable pipeline position, Async CUDA threads.
 
-```sh
-uv venv --python 3.11
-```
-```sh
-.venv\Scripts\activate
-```
-
-**3. Install requirements**
-```
-uv pip install -r requirements_cu129.txt
-```
-
-**4. Download required models**
-```sh
-python download_models.py
-```
-
-**5. Run the Application**
-
-Once everything is set up, start the application:
-- by opening the **Start.bat** file (for Windows)
-or
-Activate conda or uv environment in a terminal in the visomaster directory:
-
-```
-# If you use Anaconda
-conda activate visomaster
-
-# If you use uv only
-.venv\Scripts\activate
-
-# Start visomaster
-python main.py
-```
-
-
-**5.1 Update to latest code state**
-```sh
-cd VisoMaster
-git pull
-```
+### 12. Performance & Workflow
+*   **Optimization:** GPU used for detection (not CPU), Async CUDA threads, Optimized memory loading/unloading (VRAM management).
+*   **Stability:** Separate ONNX Probe to prevent Runtime Engine Cache crashes.
+*   **Workflow:** Auto-save workspace, Auto-load last workspace, Window state persistence.
+*   **Experimental:** Dedicated section for testing features (e.g., MPEG Compression Simulation).
+*   **Image Batch:** Automated processing for image collections.
 
 ---
 
-**6. Install ffmpeg**
+## 💻 System Requirements
 
-In Windows - Either via:
+*   **OS:** Windows 10 / 11
+*   **GPU:** NVIDIA RTX 1000, 2000, 3000, 4000, or 5000 series.
+*   **Base Dependencies (For Manual Install):**
+    *   Python 3.11
+    *   FFmpeg
+    *   CUDA 12.9
+    *   cuDNN 9.12
+    *   C++ Tools & MSVC
+    *   Git
 
-- powershell command: "winget install -e --id Gyan.FFmpeg --version 7.1.1"
-
-<br>or
-
-- Download ffmpeg zip: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.1.1-essentials_build.zip
-- Unzip it somewhere
-- Add "\<unzipped ffmpeg path>\bin" folder to your Windows environment PATH variable
-
-## How to use the Job Manager
-1.  Set up your workspace as you normally would before recording (select source/target faces, adjust settings, etc.).
-2.  In the Job Manager widget, click the **"Save Job"** button.
-3.  Give your job a name. You can also choose whether to use this name for the final output file.
-4.  The job will appear in the list. Set up more jobs if you wish.
-5.  To process, select one or more jobs and click **"Process Selected"**, or click **"Process All"** to run the entire queue.
-6.  Processing will begin automatically. A pop-up will notify you when all jobs are complete.
-
-## Development
-
-- Please use pre-commit before doing git add & commit. And fix found issues before the commit.
-
-  ```
-  # Install pre-commit
-  uv pip install pre-commit
-
-  # Usage before commits - (run twice in case of found auto corrections)
-  pre-commit run --all-files
-  ```
+**Requirements Tutorial:** [View on Patreon](https://www.patreon.com/posts/111553210) | [Video Guide](https://youtu.be/DrhUHnYfwC0)
 
 ---
 
-## [Join Discord](https://discord.gg/5rx4SQuDbp)
+## 🔧 Installation Instructions
 
-## Support The Project
-This project was made possible by the combined efforts of the original developers and the modding community. If you appreciate this work, please consider supporting them.
+### Method 1: Windows Portable (Recommended)
+*Does not require Python or libraries installed on your PC.*
+1.  Download `VisoMaster_Fusion_v2.zip`.
+2.  Extract to a **short path** (e.g., `C:/viso_master_v1`).
+    *   *Warning: Do not use spaces in folder names.*
+3.  Double-click **`Windows_Start_Portable.bat`**.
+    *   *Note: Do not run as administrator.*
 
-### **Mod Credits**
-VisoMaster-Fusion would not be possible without the incredible work of:
--   **Job Manager Mod**: Axel (https://github.com/axel-devs/VisoMaster-Job-Manager)
--   **Experimental Mod**: Hans (https://github.com/asdf31jsa/VisoMaster-Experimental)
--   **VR180/Ref-ldm Mod**: Glat0s (https://github.com/Glat0s/VisoMaster/tree/dev-vr180)
--   **Many Optimizations**: Nyny (https://github.com/Elricfae/VisoMaster---Modded)
+### Method 2: Windows Standard Install
+1.  Ensure Requirements (Python 3.11, CUDA, Git, etc.) are installed.
+2.  Extract zip to a short path.
+3.  Run **`Windows_Install.bat`**.
+4.  Run **`Windows_Start_App.bat`** to launch.
 
-## **Troubleshooting**
-- If you face CUDA-related issues, ensure your GPU drivers are up to date.
-- For missing models, double-check that all models are placed in the correct directories.
+### Method 3: Massed Compute (Cloud)
+*Note: RunPod is NOT supported as this app requires a Desktop GUI.*
+1.  Register: [Massed Compute Signup](https://vm.massedcompute.com/signup?linkId=lp_034338&sourceId=secourses&tenantId=massed-compute).
+2.  Coupon Code: `SECourses`.
+3.  Select the **SECourses** image from the Creator dropdown.
+4.  Follow the file `Massed_Compute_Instructions_READ.txt` included in the zip.
+5.  Supported GPUs: L40S, RTX A6000 ADA, RTX 6000 PRO.
 
-## [Join Discord](https://discord.gg/5rx4SQuDbp)
+---
 
-## Support The Project ##
-This project was made possible by the combined efforts of **[@argenspin](https://github.com/argenspin)** and **[@Alucard24](https://github.com/alucard24)** with the support of countless other members in our Discord community. If you wish to support us for the continued development of **Visomaster**, you can donate to either of us (or Both if you're double Awesome :smiley: )
+## ℹ️ Important Notes & Troubleshooting
 
-### **argenspin** ###
-- [BuyMeACoffee](https://buymeacoffee.com/argenspin)
-- BTC: bc1qe8y7z0lkjsw6ssnlyzsncw0f4swjgh58j9vrqm84gw2nscgvvs5s4fts8g
-- ETH: 0x967a442FBd13617DE8d5fDC75234b2052122156B
-### **Alucard24** ###
-- [BuyMeACoffee](https://buymeacoffee.com/alucard_24)
-- [PayPal](https://www.paypal.com/donate/?business=XJX2E5ZTMZUSQ&no_recurring=0&item_name=Support+us+with+a+donation!+Your+contribution+helps+us+continue+improving+and+providing+quality+content.+Thank+you!&currency_code=EUR)
-- BTC: 15ny8vV3ChYsEuDta6VG3aKdT6Ra7duRAc
+*   **TensorRT vs CUDA:** CUDA is set as the default device. While TensorRT is supported, it takes 10-15 minutes to compile every time. CUDA is recommended for speed.
+*   **Path Length:** Long directory paths or spaces in folder names will cause issues. Use a short root path (e.g., `C:/VM`).
+*   **Model Downloads:** If downloads fail, run `Windows_Fix_Resume_Model_Download.bat`.
+*   **Browser vs Desktop:** This is a desktop GUI application, not browser-based (Gradio/Streamlit), which is why it requires specific cloud setups like Massed Compute Desktop instances.
 
+## 🔗 Community & Support
+*   **Discord:** [SECourses Discord](https://discord.com/servers/software-engineering-courses-secourses-772774097734074388) (Ask for rank)
+*   **GitHub:** [Stable Diffusion & Generative AI Repo](https://github.com/FurkanGozukara/Stable-Diffusion)
+*   **Original VisoMaster Repo:** [VisoMaster GitHub](https://github.com/visomaster/VisoMaster)
+*   **Social:** [Reddit](https://www.reddit.com/r/SECourses/) | [LinkedIn](https://www.linkedin.com/in/furkangozukara/)
 
-## Disclaimer: ##
-**VisoMaster** is a hobby project that we are making available to the community as a thank you to all of the contributors ahead of us. We've copied the disclaimer from Swap-Mukham here since it is well-written and applies 100% to this repo.
-
-We would like to emphasize that our swapping software is intended for responsible and ethical use only. We must stress that users are solely responsible for their actions when using our software.
-
-Intended Usage: This software is designed to assist users in creating realistic and entertaining content, such as movies, visual effects, virtual reality experiences, and other creative applications. We encourage users to explore these possibilities within the boundaries of legality, ethical considerations, and respect for others' privacy.
-
-Ethical Guidelines: Users are expected to adhere to a set of ethical guidelines when using our software. These guidelines include, but are not limited to:
-
-Not creating or sharing content that could harm, defame, or harass individuals. Obtaining proper consent and permissions from individuals featured in the content before using their likeness. Avoiding the use of this technology for deceptive purposes, including misinformation or malicious intent. Respecting and abiding by applicable laws, regulations, and copyright restrictions.
-
-Privacy and Consent: Users are responsible for ensuring that they have the necessary permissions and consents from individuals whose likeness they intend to use in their creations. We strongly discourage the creation of content without explicit consent, particularly if it involves non-consensual or private content. It is essential to respect the privacy and dignity of all individuals involved.
-
-Legal Considerations: Users must understand and comply with all relevant local, regional, and international laws pertaining to this technology. This includes laws related to privacy, defamation, intellectual property rights, and other relevant legislation. Users should consult legal professionals if they have any doubts regarding the legal implications of their creations.
-
-Liability and Responsibility: We, as the creators and providers of the deep fake software, cannot be held responsible for the actions or consequences resulting from the usage of our software. Users assume full liability and responsibility for any misuse, unintended effects, or abusive behavior associated with the content they create.
-
-By using this software, users acknowledge that they have read, understood, and agreed to abide by the above guidelines and disclaimers. We strongly encourage users to approach this technology with caution, integrity, and respect for the well-being and rights of others.
-
-Remember, technology should be used to empower and inspire, not to harm or deceive. Let's strive for ethical and responsible use of deep fake technology for the betterment of society.
+<img width="3827" height="1938" alt="13" src="https://github.com/user-attachments/assets/32f5b9e8-78e0-4428-926f-6c1f85b9d6bd" />
+<img width="2000" height="1699" alt="12" src="https://github.com/user-attachments/assets/07aa93d0-5db8-4ca4-b3df-8d3764f4c76f" />
+<img width="2000" height="1575" alt="11" src="https://github.com/user-attachments/assets/4ab2a081-d8af-47d0-aaca-34d78f53d0d0" />
+<img width="3834" height="1989" alt="10" src="https://github.com/user-attachments/assets/19920015-5367-446f-a854-514a54c62576" />
+<img width="2589" height="1810" alt="9" src="https://github.com/user-attachments/assets/0a8094dc-bc14-4e3b-a9ca-afeacddbddda" />
+<img width="3835" height="1943" alt="8" src="https://github.com/user-attachments/assets/19b9b2e8-21b4-4b97-b186-d88b76d72092" />
+<img width="3839" height="1946" alt="7" src="https://github.com/user-attachments/assets/6a56dfeb-c918-466f-a31b-850895012c19" />
+<img width="3830" height="1923" alt="6" src="https://github.com/user-attachments/assets/c14dbee2-1c25-428e-8726-4199e212514c" />
+<img width="3824" height="1950" alt="5" src="https://github.com/user-attachments/assets/25bb0edd-cb4d-4abe-9a51-eb0c35c74c55" />
+<img width="3830" height="1953" alt="4" src="https://github.com/user-attachments/assets/63318dc3-50e6-4765-a80a-afbde048ef9a" />
+<img width="3814" height="1966" alt="3" src="https://github.com/user-attachments/assets/dc375dfa-a80e-462e-af9c-21cf145028df" />
+<img width="2000" height="1728" alt="2" src="https://github.com/user-attachments/assets/7b990c82-d13b-42e3-9689-2338ccb1c98b" />
+<img width="3808" height="1943" alt="1" src="https://github.com/user-attachments/assets/13a0e038-e641-4d06-8ae5-251896c240c7" />
