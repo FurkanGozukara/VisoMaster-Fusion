@@ -1,7 +1,9 @@
 from typing import Dict, Optional
+from collections import deque
 from pathlib import Path
 from functools import partial
 import copy
+import time
 
 from PySide6 import QtWidgets, QtGui
 from PySide6 import QtCore
@@ -67,7 +69,9 @@ ParametersWidgetTypes = Dict[
 _FACE_STRIP_MAX_HEIGHT = 120
 _FACE_STRIP_LIST_HEIGHT = 80
 _FACE_STRIP_BUTTONS_HEIGHT = 32
-_FACES_PANEL_ROW_HEIGHT = 144
+_FACES_PANEL_ROW_HEIGHT = 160
+_FACE_ACTIONS_MIN_WIDTH = 142
+_TARGET_FACES_MIN_WIDTH = 360
 
 
 class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
@@ -147,6 +151,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.dropped_frames: set[int] = set()
         self.scan_tools_expanded = False
         self.scan_issue_worker = None
+        self.face_scan_worker = None
         self.parameters_list = {}
         self.control: ControlTypes = {}
         self.parameter_widgets: ParametersWidgetTypes = {}
@@ -285,6 +290,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         )
         video_control_actions.add_scan_review_controls(self)
         video_control_actions.initialize_media_button_icons(self)
+        self._initialize_processing_fps_meter()
 
         self.viewFullScreenButton.clicked.connect(
             partial(video_control_actions.view_fullscreen, self)
@@ -324,6 +330,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.clearTargetFacesButton.clicked.connect(
             partial(card_actions.clear_target_faces, self)
         )
+        self._initialize_face_scan_controls()
         self.targetVideosSearchBox.textChanged.connect(
             partial(filter_actions.filter_target_videos, self)
         )
@@ -432,8 +439,14 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.outputFolderButton.clicked.connect(
             partial(list_view_actions.select_output_media_folder, self)
         )
+        self.targetOutputFolderButton.clicked.connect(
+            partial(list_view_actions.select_output_media_folder, self)
+        )
         common_widget_actions.create_control(self, "OutputMediaFolder", "")
         self.outputOpenButton.clicked.connect(
+            partial(list_view_actions.open_output_media_folder, self)
+        )
+        self.targetOutputOpenButton.clicked.connect(
             partial(list_view_actions.open_output_media_folder, self)
         )
 
@@ -558,6 +571,251 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton)
         )
         self.outputOpenButton.setToolTip("Open Output Directory")
+
+        self.targetOutputFolderWidget = QtWidgets.QWidget(self.dockWidgetContents)
+        self.targetOutputFolderWidget.setObjectName("targetOutputFolderWidget")
+        target_output_layout = QtWidgets.QHBoxLayout(self.targetOutputFolderWidget)
+        target_output_layout.setContentsMargins(0, 0, 0, 0)
+        target_output_layout.setSpacing(6)
+
+        target_output_label = QtWidgets.QLabel("Output", self.targetOutputFolderWidget)
+        target_output_label.setObjectName("targetOutputFolderLabel")
+        target_output_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
+
+        self.targetOutputFolderLineEdit = QtWidgets.QLineEdit(
+            self.targetOutputFolderWidget
+        )
+        self.targetOutputFolderLineEdit.setObjectName("targetOutputFolderLineEdit")
+        self.targetOutputFolderLineEdit.setReadOnly(True)
+        self.targetOutputFolderLineEdit.setPlaceholderText("Select Output Folder")
+        self.targetOutputFolderLineEdit.setToolTip("Output Directory")
+
+        self.targetOutputFolderButton = QtWidgets.QToolButton(
+            self.targetOutputFolderWidget
+        )
+        self.targetOutputFolderButton.setObjectName("targetOutputFolderButton")
+        self.targetOutputFolderButton.setIcon(closed_folder_icon)
+        self.targetOutputFolderButton.setToolTip("Select Output Directory")
+        self.targetOutputFolderButton.setAutoRaise(True)
+
+        self.targetOutputOpenButton = QtWidgets.QToolButton(
+            self.targetOutputFolderWidget
+        )
+        self.targetOutputOpenButton.setObjectName("targetOutputOpenButton")
+        self.targetOutputOpenButton.setIcon(
+            style.standardIcon(QtWidgets.QStyle.StandardPixmap.SP_DialogOpenButton)
+        )
+        self.targetOutputOpenButton.setToolTip("Open Output Directory")
+        self.targetOutputOpenButton.setAutoRaise(True)
+
+        target_output_layout.addWidget(target_output_label)
+        target_output_layout.addWidget(self.targetOutputFolderLineEdit, 1)
+        target_output_layout.addWidget(self.targetOutputFolderButton)
+        target_output_layout.addWidget(self.targetOutputOpenButton)
+        self.vboxLayout.insertWidget(0, self.targetOutputFolderWidget)
+
+        # Both read-only views mirror the same OutputMediaFolder control. The
+        # reverse connection also keeps programmatic updates symmetric.
+        self.outputFolderLineEdit.textChanged.connect(
+            self.targetOutputFolderLineEdit.setText
+        )
+        self.targetOutputFolderLineEdit.textChanged.connect(
+            self.outputFolderLineEdit.setText
+        )
+        self.outputFolderLineEdit.textChanged.connect(
+            partial(
+                common_widget_actions.create_control,
+                self,
+                "OutputMediaFolder",
+            )
+        )
+
+    def _initialize_processing_fps_meter(self):
+        self.processingFpsLabel = QtWidgets.QLabel("FPS --", self.mediaLayout)
+        self.processingFpsLabel.setObjectName("processingFpsLabel")
+        self.processingFpsLabel.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.processingFpsLabel.setToolTip("Live processed frames per second")
+        self.processingFpsLabel.setMinimumSize(58, 17)
+        self.processingFpsLabel.setMaximumHeight(17)
+        fps_font = QtGui.QFontDatabase.systemFont(
+            QtGui.QFontDatabase.SystemFont.FixedFont
+        )
+        fps_font.setPointSize(8)
+        fps_font.setBold(True)
+        self.processingFpsLabel.setFont(fps_font)
+        self.processingFpsLabel.setStyleSheet(
+            "QLabel { color: #8b98a0; background: #161b1e; "
+            "border: 1px solid #334047; border-radius: 3px; padding: 0 5px; }"
+        )
+
+        self._processing_fps_timestamps = deque(maxlen=240)
+        self._processing_fps_active = False
+        self._processing_fps_smoothed = None
+        self._processing_fps_timer = QtCore.QTimer(self)
+        self._processing_fps_timer.setInterval(250)
+        self._processing_fps_timer.timeout.connect(self._refresh_processing_fps_label)
+
+        self.video_processor.processing_started_signal.connect(
+            self._start_processing_fps_meter
+        )
+        self.video_processor.processing_stopped_signal.connect(
+            self._stop_processing_fps_meter
+        )
+        self.video_processor.frame_processed_signal.connect(
+            self._record_processed_frame_for_fps
+        )
+        self.video_processor.webcam_frame_processed_signal.connect(
+            self._record_processed_webcam_frame_for_fps
+        )
+
+    @QtCore.Slot()
+    def _start_processing_fps_meter(self):
+        self._processing_fps_timestamps.clear()
+        self._processing_fps_smoothed = None
+        self._processing_fps_active = True
+        self.processingFpsLabel.setText("FPS ...")
+        self.processingFpsLabel.setStyleSheet(
+            "QLabel { color: #c8fbff; background: #10272b; "
+            "border: 1px solid #47b7c4; border-radius: 3px; padding: 0 5px; }"
+        )
+        self._processing_fps_timer.start()
+
+    @QtCore.Slot()
+    def _stop_processing_fps_meter(self):
+        if self._processing_fps_active:
+            self._refresh_processing_fps_label()
+        self._processing_fps_active = False
+        self._processing_fps_timer.stop()
+        self.processingFpsLabel.setStyleSheet(
+            "QLabel { color: #8b98a0; background: #161b1e; "
+            "border: 1px solid #334047; border-radius: 3px; padding: 0 5px; }"
+        )
+
+    @QtCore.Slot(int, object)
+    def _record_processed_frame_for_fps(self, _frame_number, _frame):
+        self._record_processing_fps_timestamp()
+
+    @QtCore.Slot(object)
+    def _record_processed_webcam_frame_for_fps(self, _frame):
+        self._record_processing_fps_timestamp()
+
+    def _record_processing_fps_timestamp(self):
+        if self._processing_fps_active:
+            self._processing_fps_timestamps.append(time.perf_counter())
+
+    @QtCore.Slot()
+    def _refresh_processing_fps_label(self):
+        now = time.perf_counter()
+        timestamps = self._processing_fps_timestamps
+        while timestamps and now - timestamps[0] > 2.0:
+            timestamps.popleft()
+
+        if len(timestamps) < 2:
+            if self._processing_fps_active:
+                self.processingFpsLabel.setText("FPS ...")
+            elif self._processing_fps_smoothed is None:
+                self.processingFpsLabel.setText("FPS --")
+            return
+
+        elapsed = timestamps[-1] - timestamps[0]
+        if elapsed <= 0:
+            return
+        instant_fps = (len(timestamps) - 1) / elapsed
+        if self._processing_fps_smoothed is None:
+            self._processing_fps_smoothed = instant_fps
+        else:
+            self._processing_fps_smoothed = (
+                0.35 * instant_fps + 0.65 * self._processing_fps_smoothed
+            )
+        self.processingFpsLabel.setText(f"FPS {self._processing_fps_smoothed:4.1f}")
+
+    def _initialize_face_scan_controls(self):
+        self.scanTargetFacesButton = QtWidgets.QToolButton(self.verticalWidget)
+        self.scanTargetFacesButton.setObjectName("scanTargetFacesButton")
+        self.scanTargetFacesButton.setStyleSheet(
+            "QToolButton#scanTargetFacesButton::menu-button {"
+            "background-color: rgba(128, 128, 128, 28);"
+            "border: 1px solid rgba(128, 128, 128, 70);"
+            "border-top-right-radius: 4px; border-bottom-right-radius: 4px;"
+            "width: 22px; }"
+            "QToolButton#scanTargetFacesButton::menu-button:hover,"
+            "QToolButton#scanTargetFacesButton::menu-button:pressed {"
+            "background-color: rgba(128, 128, 128, 55); }"
+        )
+        self.scanTargetFacesButton.setText("Scan Video")
+        self.scanTargetFacesButton.setIcon(
+            self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_BrowserReload)
+        )
+        self.scanTargetFacesButton.setIconSize(QtCore.QSize(18, 18))
+        self.scanTargetFacesButton.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.scanTargetFacesButton.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.MenuButtonPopup
+        )
+        self.scanTargetFacesButton.setMinimumWidth(_FACE_ACTIONS_MIN_WIDTH)
+        self.scanTargetFacesButton.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+        self._selected_target_face_scan_mode = "smart"
+        self.scanTargetFacesButton.clicked.connect(self._run_selected_target_face_scan)
+
+        scan_menu = QtWidgets.QMenu(self.scanTargetFacesButton)
+        scan_menu.setToolTipsVisible(True)
+        scan_action_group = QtGui.QActionGroup(scan_menu)
+        scan_action_group.setExclusive(True)
+        self._face_scan_action_group = scan_action_group
+        scan_modes = (
+            (
+                "Quick Scan",
+                "quick",
+                QtWidgets.QStyle.StandardPixmap.SP_MediaSkipForward,
+                "Fast full-clip pass using about 2 samples per second",
+            ),
+            (
+                "Smart Scan",
+                "smart",
+                QtWidgets.QStyle.StandardPixmap.SP_DialogApplyButton,
+                "Recommended full-clip pass using about 6 samples per second",
+            ),
+            (
+                "Every Frame",
+                "thorough",
+                QtWidgets.QStyle.StandardPixmap.SP_MediaSeekForward,
+                "Exhaustive pass that checks every frame",
+            ),
+        )
+        self._face_scan_mode_actions = {}
+        self._face_scan_mode_tooltips = {}
+        for label, mode, icon_type, tooltip in scan_modes:
+            action = scan_menu.addAction(self.style().standardIcon(icon_type), label)
+            action.setCheckable(True)
+            action.setChecked(mode == self._selected_target_face_scan_mode)
+            action.setToolTip(tooltip)
+            scan_action_group.addAction(action)
+            action.triggered.connect(partial(self._run_target_face_scan_mode, mode))
+            self._face_scan_mode_actions[mode] = action
+            self._face_scan_mode_tooltips[mode] = tooltip
+        self.scanTargetFacesButton.setMenu(scan_menu)
+        self.scanTargetFacesButton.setToolTip(
+            self._face_scan_mode_tooltips[self._selected_target_face_scan_mode]
+        )
+        self.controlButtonsLayout.insertWidget(1, self.scanTargetFacesButton)
+
+    @QtCore.Slot(bool)
+    def _run_selected_target_face_scan(self, _checked=False):
+        self._run_target_face_scan_mode(self._selected_target_face_scan_mode)
+
+    def _run_target_face_scan_mode(self, mode_key: str, _checked=False):
+        self._selected_target_face_scan_mode = str(mode_key)
+        action = self._face_scan_mode_actions.get(mode_key)
+        if action is not None:
+            action.setChecked(True)
+        self.scanTargetFacesButton.setToolTip(
+            self._face_scan_mode_tooltips.get(mode_key, "Scan the complete video")
+        )
+        card_actions.start_target_face_scan(self, mode_key)
 
     def _configure_file_menu_actions(self):
         self.actionOpen_Videos_Folder.setText("Load Target Media Folder")
@@ -953,6 +1211,12 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def closeEvent(self, event):
         print("[INFO] MainWindow: closeEvent called.")
 
+        for worker_name in ("face_scan_worker", "scan_issue_worker"):
+            worker = getattr(self, worker_name, None)
+            if worker is not None:
+                worker.cancel()
+                worker.wait()
+
         self.video_processor.stop_processing()
         list_view_actions.clear_stop_loading_input_media(self)
         list_view_actions.clear_stop_loading_target_media(self)
@@ -1104,6 +1368,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.liveSoundButton.setIconSize(QtCore.QSize(24, 24))
         self.theatreModeButton.setIconSize(QtCore.QSize(28, 28))
 
+        play_control_widget = getattr(self, "playControlWidget", None)
+        if play_control_widget is not None:
+            play_control_widget.setMinimumWidth(self.buttonMediaPlay.minimumWidth())
+            play_control_widget.setMaximumWidth(target_size.width())
+
         for button in text_utility_buttons:
             if button is None:
                 continue
@@ -1194,6 +1463,23 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.mediaControlsTransportLayout = self.mediaControlsMainLayout
         self.mediaControlsUtilityLayout = self.mediaControlsMainLayout
 
+        self.playControlWidget = QtWidgets.QWidget(self.mediaControlsCenterWidget)
+        self.playControlWidget.setObjectName("playControlWidget")
+        self.playControlLayout = QtWidgets.QVBoxLayout(self.playControlWidget)
+        self.playControlLayout.setContentsMargins(0, 0, 0, 0)
+        self.playControlLayout.setSpacing(2)
+        self.playControlLayout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.playControlLayout.addWidget(
+            self.buttonMediaPlay, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
+        )
+        self.playControlLayout.addWidget(
+            self.processingFpsLabel, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
+        )
+        self.playControlWidget.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Minimum,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
+
         for button in [
             self.addMarkerButton,
             self.removeMarkerButton,
@@ -1208,7 +1494,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             self.theatreModeButton,
         ]:
             button.show()
-            self.mediaControlsMainLayout.addWidget(button)
+            if button is self.buttonMediaPlay:
+                self.playControlWidget.show()
+                self.mediaControlsMainLayout.addWidget(self.playControlWidget)
+            else:
+                self.mediaControlsMainLayout.addWidget(button)
 
         scan_tools_button = getattr(self, "scanToolsToggleButton", None)
         if scan_tools_button is not None:
@@ -1642,24 +1932,54 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         """Keep the left-side face buttons matched to the visible target-faces box height."""
         buttons = [
             self.findTargetFacesButton,
+            self.scanTargetFacesButton,
             self.clearTargetFacesButton,
             self.swapfacesButton,
             self.editFacesButton,
         ]
 
-        self.gridLayout_2.setRowStretch(1, 0)
-        self.controlButtonsLayout.setSpacing(4)
+        for button in buttons:
+            self.controlButtonsLayout.removeWidget(button)
+        for index, button in enumerate(buttons):
+            self.controlButtonsLayout.insertWidget(index, button)
 
-        self.targetFacesList.setMinimumHeight(_FACES_PANEL_ROW_HEIGHT)
-        self.targetFacesList.setMaximumHeight(_FACES_PANEL_ROW_HEIGHT)
-        self.inputEmbeddingsList.setMinimumHeight(_FACES_PANEL_ROW_HEIGHT)
-        self.inputEmbeddingsList.setMaximumHeight(_FACES_PANEL_ROW_HEIGHT)
+        self.gridLayout_2.setRowStretch(1, 0)
+        self.gridLayout_2.setColumnStretch(0, 0)
+        self.gridLayout_2.setColumnStretch(1, 4)
+        self.gridLayout_2.setColumnStretch(2, 7)
+        self.gridLayout_2.setHorizontalSpacing(8)
+        self.controlButtonsLayout.setSpacing(3)
 
         margins = self.controlButtonsLayout.contentsMargins()
         spacing_total = self.controlButtonsLayout.spacing() * (len(buttons) - 1)
         margins_total = margins.top() + margins.bottom()
+        preferred_button_height = max(button.sizeHint().height() for button in buttons)
+        row_height = max(
+            _FACES_PANEL_ROW_HEIGHT,
+            margins_total + spacing_total + preferred_button_height * len(buttons),
+        )
+
+        self.targetFacesList.setMinimumHeight(row_height)
+        self.targetFacesList.setMaximumHeight(row_height)
+        self.targetFacesList.setMinimumWidth(_TARGET_FACES_MIN_WIDTH)
+        self.inputEmbeddingsList.setMinimumHeight(row_height)
+        self.inputEmbeddingsList.setMaximumHeight(row_height)
+
+        target_faces_policy = self.targetFacesList.sizePolicy()
+        target_faces_policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Expanding)
+        target_faces_policy.setVerticalPolicy(QtWidgets.QSizePolicy.Fixed)
+        target_faces_policy.setHorizontalStretch(4)
+        self.targetFacesList.setSizePolicy(target_faces_policy)
+
+        embeddings_policy = self.inputEmbeddingsList.sizePolicy()
+        embeddings_policy.setHorizontalPolicy(QtWidgets.QSizePolicy.Expanding)
+        embeddings_policy.setVerticalPolicy(QtWidgets.QSizePolicy.Fixed)
+        embeddings_policy.setHorizontalStretch(7)
+        self.inputEmbeddingsList.setSizePolicy(embeddings_policy)
+
         button_height = max(
-            1, (_FACES_PANEL_ROW_HEIGHT - spacing_total - margins_total) // len(buttons)
+            preferred_button_height,
+            (row_height - spacing_total - margins_total) // len(buttons),
         )
 
         for i, button in enumerate(buttons):
@@ -1670,23 +1990,29 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             button.setSizePolicy(size_policy)
             self.controlButtonsLayout.setStretch(i, 1)
 
-        self.facesButtonsWidget.setMinimumHeight(_FACES_PANEL_ROW_HEIGHT)
-        self.facesButtonsWidget.setMaximumHeight(_FACES_PANEL_ROW_HEIGHT)
+        self.facesButtonsWidget.setMinimumHeight(row_height)
+        self.facesButtonsWidget.setMaximumHeight(row_height)
         faces_widget_policy = self.facesButtonsWidget.sizePolicy()
         faces_widget_policy.setVerticalPolicy(QtWidgets.QSizePolicy.Fixed)
         self.facesButtonsWidget.setSizePolicy(faces_widget_policy)
 
-        self.verticalWidget.setMinimumHeight(_FACES_PANEL_ROW_HEIGHT)
-        self.verticalWidget.setMaximumHeight(_FACES_PANEL_ROW_HEIGHT)
+        self.verticalWidget.setMinimumHeight(row_height)
+        self.verticalWidget.setMaximumHeight(row_height)
         vertical_widget_policy = self.verticalWidget.sizePolicy()
         vertical_widget_policy.setVerticalPolicy(QtWidgets.QSizePolicy.Fixed)
         self.verticalWidget.setSizePolicy(vertical_widget_policy)
 
-        target_width = self.saveImageButton.sizeHint().width()
+        target_width = max(
+            _FACE_ACTIONS_MIN_WIDTH,
+            self.saveImageButton.sizeHint().width(),
+            *(button.sizeHint().width() + 4 for button in buttons),
+        )
         self.facesButtonsWidget.setMinimumWidth(target_width)
         self.facesButtonsWidget.setMaximumWidth(target_width)
         self.verticalWidget.setMinimumWidth(target_width)
         self.verticalWidget.setMaximumWidth(target_width)
+        self.saveImageButton.setMinimumWidth(target_width)
+        self.saveImageButton.setMaximumWidth(target_width)
 
         for button in buttons:
             button.setMinimumWidth(target_width)
@@ -1696,6 +2022,11 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         panel_policy.setVerticalPolicy(QtWidgets.QSizePolicy.Maximum)
         self.facesPanelGroupBox.setSizePolicy(panel_policy)
         self.facesPanelGroupBox.setMinimumHeight(0)
+        self.facesPanelGroupBox.setMaximumHeight(16777215)
+        self.gridLayout_2.activate()
+        self.facesPanelGroupBox.setMaximumHeight(
+            max(row_height, self.facesPanelGroupBox.sizeHint().height())
+        )
 
     def _ensure_right_faces_strip(self):
         """Initializes the right faces strip container once."""
@@ -1749,6 +2080,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         btns = [
             (self.findTargetFacesButton, "Find"),
+            (self.scanTargetFacesButton, "Scan"),
             (self.clearTargetFacesButton, "Clear"),
             (self.swapfacesButton, "Swap"),
             (self.editFacesButton, "Edit"),
@@ -1763,11 +2095,17 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
             # Insert before the stretch item (which is at the end)
             self._rightFacesButtonsRow.insertWidget(i, btn)
             btn.setText(short_text)
-            btn.setFlat(True)
+            btn.setMinimumWidth(72)
+            btn.setMaximumWidth(104)
+            if isinstance(btn, QtWidgets.QToolButton):
+                btn.setAutoRaise(True)
+            else:
+                btn.setFlat(True)
 
         self.targetFacesList.setViewMode(QtWidgets.QListView.IconMode)
         self.targetFacesList.setWrapping(True)
         self.targetFacesList.setSpacing(4)
+        self.targetFacesList.setMinimumWidth(0)
         self.targetFacesList.setMinimumHeight(60)
         self.targetFacesList.setMaximumHeight(_FACE_STRIP_LIST_HEIGHT)
 
@@ -1777,6 +2115,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
 
         btns = [
             self.findTargetFacesButton,
+            self.scanTargetFacesButton,
             self.clearTargetFacesButton,
             self.swapfacesButton,
             self.editFacesButton,
@@ -1788,7 +2127,10 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
                 orig = self._faceButtonsOriginalTexts.get(btn.objectName())
                 if orig:
                     btn.setText(orig)
-            btn.setFlat(True)
+            if isinstance(btn, QtWidgets.QToolButton):
+                btn.setAutoRaise(False)
+            else:
+                btn.setFlat(True)
 
         self.targetFacesList.setMaximumHeight(16777215)
         if hasattr(self, "_rightFacesStrip"):

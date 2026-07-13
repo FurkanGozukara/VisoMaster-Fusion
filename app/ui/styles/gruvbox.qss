@@ -11,7 +11,8 @@ QLabel {
     color: #ebdbb2;
 }
 
-QPushButton {
+QPushButton,
+QToolButton#scanTargetFacesButton {
     color: #ebdbb2;
     background-color: #3c3836;
     border: 1px solid #504945;
@@ -27,7 +28,8 @@ QPushButton[flat="true"] {
     border-radius: 4px;
 }
 
-QPushButton:hover {
+QPushButton:hover,
+QToolButton#scanTargetFacesButton:hover {
     background-color: #4b4540;
     border: 1px solid #83a598;
 }
@@ -37,7 +39,8 @@ QPushButton[flat="true"]:hover {
     border: 1px solid #83a598;
 }
 
-QPushButton:pressed {
+QPushButton:pressed,
+QToolButton#scanTargetFacesButton:pressed {
     background-color: #458588;
     color: #282828;
     border: 1px solid #3a6f72;
@@ -59,7 +62,8 @@ QPushButton[flat="true"]:checked {
     border: 1px solid #83a598;
 }
 
-QPushButton:disabled {
+QPushButton:disabled,
+QToolButton#scanTargetFacesButton:disabled {
     background-color: #353230;
     color: #928374;
     border: 1px solid #504945;
@@ -71,7 +75,8 @@ QPushButton[flat="true"]:disabled {
     border: 1px solid #504945;
 }
 
-QPushButton:focus {
+QPushButton:focus,
+QToolButton#scanTargetFacesButton:focus {
     border: 1px solid #83a598;
 }
 

@@ -442,6 +442,13 @@ def _load_job_target_faces_and_params(main_window: "MainWindow", data: dict):
         # Load assigned faces/embeddings into the created target_face object
         if face_id in main_window.target_faces:
             target_face_obj = main_window.target_faces[face_id]
+            target_face_obj.set_scan_metadata(
+                frame_number=target_face_data.get("scan_source_frame"),
+                media_path=target_face_data.get("scan_media_path", ""),
+                occurrences=target_face_data.get("scan_occurrences", 0),
+                mode_key=target_face_data.get("scan_mode_key", ""),
+                source_fps=target_face_data.get("scan_source_fps", 0.0),
+            )
 
             # Load assigned merged embeddings
             target_face_obj.assigned_merged_embeddings.clear()
@@ -1150,6 +1157,11 @@ def _serialize_job_data(main_window: "MainWindow") -> dict:
                 embed_model: embedding.tolist()
                 for embed_model, embedding in target_face.assigned_input_embedding.items()
             },
+            "scan_source_frame": target_face.scan_source_frame,
+            "scan_media_path": target_face.scan_media_path,
+            "scan_occurrences": target_face.scan_occurrences,
+            "scan_mode_key": target_face.scan_mode_key,
+            "scan_source_fps": target_face.scan_source_fps,
         }
 
     # Serialize Merged Embeddings

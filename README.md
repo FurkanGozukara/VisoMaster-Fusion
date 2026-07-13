@@ -51,6 +51,7 @@ The first launch downloads the portable runtime, dependencies, FFmpeg, and model
 ### 🎬 Video, Jobs & Output
 
 - Timeline markers for saving per-frame settings and record start/end segments.
+- Full-video unique-face discovery with Quick, Smart, and Every Frame modes, review-before-add results, and source-frame navigation.
 - Issue scanning and dropped-frame review tools for checking render-sensitive frames before output.
 - Job Manager for saving workspaces, loading jobs, and running batches unattended.
 - Output controls for images, videos, multi-segment renders, audio handling, quality settings, and FFmpeg options.

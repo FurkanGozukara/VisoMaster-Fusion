@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CUDA vs TensorRT | VisoMaster Backend Benchmark</title>
+  <style>
+    :root { color-scheme: dark; --bg:#111416; --surface:#191d20; --line:#343b40; --text:#edf1f2; --muted:#aab4b8; --cuda:#39b8c7; --trt:#f0a84b; --good:#71c587; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:Inter,Segoe UI,Arial,sans-serif; line-height:1.45; letter-spacing:0; }
+    header { border-bottom:1px solid var(--line); background:#15191b; }
+    .wrap { width:min(1120px, calc(100% - 32px)); margin:0 auto; }
+    header .wrap { padding:32px 0 26px; }
+    h1 { margin:0 0 8px; font-size:42px; font-weight:760; letter-spacing:0; }
+    h2 { margin:0 0 16px; font-size:21px; letter-spacing:0; }
+    p { margin:0; }
+    .lede { color:var(--muted); max-width:760px; font-size:16px; }
+    .meta { display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:18px; color:var(--muted); font-size:13px; }
+    main { padding:26px 0 44px; }
+    section { padding:24px 0; border-bottom:1px solid var(--line); }
+    .result-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    .metric { background:var(--surface); border:1px solid var(--line); border-radius:6px; padding:16px; min-width:0; }
+    .metric span { display:block; color:var(--muted); font-size:12px; text-transform:uppercase; font-weight:700; }
+    .metric strong { display:block; margin-top:5px; font-size:32px; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+    .metric small { color:var(--muted); }
+    .accent { color:var(--good); }
+    .chart-row { display:grid; grid-template-columns:92px 1fr 100px; gap:12px; align-items:center; margin:12px 0; }
+    .track { height:20px; background:#252b2f; border:1px solid var(--line); border-radius:3px; overflow:hidden; }
+    .bar { height:100%; min-width:2px; }
+    .bar.cuda { background:var(--cuda); }
+    .bar.trt { background:var(--trt); }
+    .value { text-align:right; font-variant-numeric:tabular-nums; }
+    .legend { display:flex; gap:18px; color:var(--muted); font-size:13px; margin-bottom:14px; }
+    .dot { width:10px; height:10px; display:inline-block; margin-right:6px; border-radius:2px; }
+    .note { border-left:3px solid var(--good); padding:12px 14px; background:#18201b; color:#dfe9e1; }
+    .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:6px; }
+    table { width:100%; border-collapse:collapse; min-width:650px; font-size:14px; }
+    th,td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:right; font-variant-numeric:tabular-nums; }
+    th:first-child,td:first-child { text-align:left; }
+    thead { background:#20262a; color:#d9e0e2; }
+    tbody tr:last-child td { border-bottom:0; }
+    dl { display:grid; grid-template-columns:minmax(180px,280px) 1fr; gap:9px 18px; margin:0; }
+    dt { color:var(--muted); } dd { margin:0; overflow-wrap:anywhere; }
+    code { color:#d6e8ec; font-family:Consolas,monospace; font-size:12px; }
+    .fine { color:var(--muted); font-size:13px; margin-top:12px; }
+    @media (max-width:720px) { h1 { font-size:32px; } .result-grid { grid-template-columns:1fr; } .metric strong { font-size:28px; } .chart-row { grid-template-columns:72px 1fr 82px; gap:8px; } dl { grid-template-columns:1fr; gap:2px; } dd { margin-bottom:10px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>CUDA vs TensorRT</h1>
+      <p class="lede">A measured VisoMaster default face-swap pipeline comparison using the supplied 1080p example video and source face.</p>
+      <div class="meta"><span>NVIDIA GeForce RTX 5090</span><span>32,607 MB VRAM</span><span>Driver 596.21</span><span>Build 67801b1 + local changes</span><span>2026-07-13T21:10:34+03:00</span></div>
+    </div>
+  </header>
+  <main class="wrap">
+    <section>
+      <div class="result-grid">
+        <div class="metric"><span>CUDA processing</span><strong>27.06 FPS</strong><small>35.71 ms median</small></div>
+        <div class="metric"><span>TensorRT processing</span><strong>33.34 FPS</strong><small>29.01 ms median</small></div>
+        <div class="metric"><span>TensorRT difference</span><strong class="accent">1.23x</strong><small>23.2% faster than CUDA</small></div>
+      </div>
+    </section>
+    <section>
+      <h2>Processing Speed</h2>
+      <div class="legend"><span><i class="dot" style="background:var(--cuda)"></i>CUDA</span><span><i class="dot" style="background:var(--trt)"></i>TensorRT</span></div>
+      <div class="chart-row"><b>CUDA</b><div class="track"><div class="bar cuda" style="width:81.2%"></div></div><div class="value">27.06 FPS</div></div>
+      <div class="chart-row"><b>TensorRT</b><div class="track"><div class="bar trt" style="width:100.0%"></div></div><div class="value">33.34 FPS</div></div>
+      <p class="fine">Source video rate: 23.976 FPS. The benchmark returns every processed frame to CPU memory, matching the app pipeline boundary.</p>
+    </section>
+    <section>
+      <h2>VRAM During Processing</h2>
+      <div class="chart-row"><b>CUDA</b><div class="track"><div class="bar cuda" style="width:92.1%"></div></div><div class="value">1,782 MB</div></div>
+      <div class="chart-row"><b>TensorRT</b><div class="track"><div class="bar trt" style="width:100.0%"></div></div><div class="value">1,934 MB</div></div>
+      <p class="fine">TensorRT used 152 MB more peak VRAM than CUDA. Values are GPU-wide used-memory increments above the idle baseline because Windows WDDM does not expose per-process VRAM through <code>nvidia-smi</code>.</p>
+    </section>
+    <section>
+      <h2>Recommendation</h2>
+      <p class="note">Use TensorRT when throughput is the priority on this machine. It led CUDA in this controlled default-swap workload.</p>
+    </section>
+    <section>
+      <h2>Repeat Results</h2>
+      <div class="table-wrap"><table><thead><tr><th>Backend</th><th>Run</th><th>Frames</th><th>FPS</th><th>Mean latency</th><th>Median latency</th></tr></thead><tbody><tr><td>CUDA</td><td>1</td><td>120</td><td>27.40</td><td>36.50 ms</td><td>35.49 ms</td></tr><tr><td>CUDA</td><td>2</td><td>120</td><td>26.53</td><td>37.70 ms</td><td>36.99 ms</td></tr><tr><td>CUDA</td><td>3</td><td>120</td><td>27.29</td><td>36.65 ms</td><td>35.54 ms</td></tr><tr><td>TensorRT</td><td>1</td><td>120</td><td>33.67</td><td>29.70 ms</td><td>28.54 ms</td></tr><tr><td>TensorRT</td><td>2</td><td>120</td><td>33.79</td><td>29.60 ms</td><td>28.45 ms</td></tr><tr><td>TensorRT</td><td>3</td><td>120</td><td>32.57</td><td>30.70 ms</td><td>29.86 ms</td></tr></tbody></table></div>
+    </section>
+    <section>
+      <h2>Method</h2>
+      <dl>
+        <dt>Workload</dt><dd>RetinaFace detection, Inswapper128ArcFace recognition and matching, one Inswapper128 swap, mask/paste, and GPU-to-CPU frame return.</dd>
+        <dt>Media</dt><dd><code>G:\VisoMaster_Fusion_v5\Example_Face_Video\test_video.mp4</code><br><code>G:\VisoMaster_Fusion_v5\Example_Face_Video\face1.jpg</code></dd>
+        <dt>Video</dt><dd>1920x1080, 23.976 FPS, 510 source frames</dd>
+        <dt>Measured sample</dt><dd>3 repeats x 120 sequential frames = 360 frames per backend, after 8 warmup frames</dd>
+        <dt>Timing boundary</dt><dd>Frame processing only. File decode, audio, output encoding, and disk writes excluded.</dd>
+        <dt>Concurrency</dt><dd>One controlled processing worker. Multi-worker playback or recording can change absolute FPS and VRAM, but not the models or backend path compared here.</dd>
+        <dt>CUDA setup + warmup</dt><dd>1.66 seconds</dd>
+        <dt>TensorRT setup + warmup</dt><dd>3.15 seconds, using engine/timing caches where available</dd>
+        <dt>Software</dt><dd>PyTorch 2.13.0+cu130; ONNX Runtime 1.27.0; TensorRT 10.16.1.11</dd>
+      </dl>
+      <p class="fine">Measured results are specific to this GPU, driver, models, settings, media, engine cache state, and app build. Re-run <code>tools/benchmark_cuda_vs_tensorrt.py</code> after meaningful driver or model changes.</p>
+    </section>
+  </main>
+</body>
+</html>

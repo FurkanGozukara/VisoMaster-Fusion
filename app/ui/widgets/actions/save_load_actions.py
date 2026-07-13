@@ -594,6 +594,13 @@ def load_saved_workspace(
                 list_view_actions.add_media_thumbnail_to_target_faces_list(
                     main_window, cropped_face, embedding_store, pixmap, face_id
                 )
+                main_window.target_faces[face_id].set_scan_metadata(
+                    frame_number=target_face_data.get("scan_source_frame"),
+                    media_path=target_face_data.get("scan_media_path", ""),
+                    occurrences=target_face_data.get("scan_occurrences", 0),
+                    mode_key=target_face_data.get("scan_mode_key", ""),
+                    source_fps=target_face_data.get("scan_source_fps", 0.0),
+                )
                 main_window.parameters[face_id] = convert_parameters_to_supported_type(
                     main_window,
                     data["target_faces_data"][face_id]["parameters"],
@@ -1076,6 +1083,11 @@ def save_current_workspace(
                 for model, emb in target_face.assigned_input_embedding.items()
             },
             "assigned_kv_map": assigned_kv_map_serializable,
+            "scan_source_frame": target_face.scan_source_frame,
+            "scan_media_path": target_face.scan_media_path,
+            "scan_occurrences": target_face.scan_occurrences,
+            "scan_mode_key": target_face.scan_mode_key,
+            "scan_source_fps": target_face.scan_source_fps,
         }
 
     # --- Serialize Embeddings ---
@@ -1363,6 +1375,11 @@ def save_current_job(main_window: "MainWindow"):
             "assigned_merged_embeddings": list(
                 target_face.assigned_merged_embeddings.keys()
             ),
+            "scan_source_frame": target_face.scan_source_frame,
+            "scan_media_path": target_face.scan_media_path,
+            "scan_occurrences": target_face.scan_occurrences,
+            "scan_mode_key": target_face.scan_mode_key,
+            "scan_source_fps": target_face.scan_source_fps,
         }
 
     # Use pathlib

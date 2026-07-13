@@ -49,6 +49,8 @@ For best results, use a clear source face with good lighting, a mostly visible f
 
 > **Tip:** If the scene contains several people and you only want to swap one of them, remove or ignore the other detected faces before recording.
 
+For longer or more difficult videos, use **Scan Video** instead of checking frames by hand. **Smart Scan** samples the complete clip and finds face views that are not covered by the target cards you already have. Review the thumbnail grid, uncheck other people or unwanted views, then click **Add Selected**. Use the arrow side of the button to choose a faster **Quick Scan** or an exhaustive **Every Frame** scan; the main side repeats the checked mode.
+
 ---
 
 ## Step 4 - Use Safe Starter Settings
@@ -69,9 +71,7 @@ This gives most users a good starting point without needing advanced tuning.
 
 ## Step 5 - Set Your Output Folder
 
-Before saving or recording, make sure an output folder is selected.
-
-Set this in the **Settings** tab before you use **Save Image** or **Record**.
+Before saving or recording, make sure an output folder is selected. Use the compact **Output** row directly above **Target Media**, or set it in the **Settings** tab. Both controls always show and update the same folder.
 
 - Use **Save Image** for images
 - Use **Record** for videos
@@ -85,6 +85,8 @@ Set this in the **Settings** tab before you use **Save Image** or **Record**.
 1. Preview the result in the main window.
 2. If you are working with video, play a short section first.
 3. When you are happy with the result, use **Save Image** or **Record**.
+
+The live **FPS** label directly below the Play button shows the current processing speed while playback or recording is active.
 
 ---
 

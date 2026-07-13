@@ -284,6 +284,83 @@ class IssueScanWorker(qtc.QThread):
             self.failed.emit(str(exc))
 
 
+class FaceScanWorker(qtc.QThread):
+    progress = qtc.Signal(int, int, int, int, float)
+    completed = qtc.Signal(object)
+    failed = qtc.Signal(str)
+
+    def __init__(self, main_window: "MainWindow", mode_key: str, parent=None):
+        super().__init__(parent)
+        self.main_window = main_window
+        self.mode_key = str(mode_key)
+        self._cancel_event = threading.Event()
+        self._control_snapshot = main_window.control.copy()
+
+        recognition_model = str(
+            self._control_snapshot.get(
+                "RecognitionModelSelection", "Inswapper128ArcFace"
+            )
+        )
+        default_parameters = getattr(main_window.default_parameters, "data", {})
+        default_threshold = float(
+            default_parameters.get("SimilarityThresholdSlider", 60)
+        )
+        selected_face_id = getattr(main_window, "selected_target_face_id", None)
+        selected_parameters = main_window.parameters.get(selected_face_id)
+        self._discovery_threshold = float(
+            selected_parameters.get("SimilarityThresholdSlider", default_threshold)
+            if selected_parameters is not None
+            else default_threshold
+        )
+
+        self._existing_faces_snapshot = []
+        for face_id, target_face in main_window.target_faces.items():
+            parameters = main_window.parameters.get(face_id)
+            threshold = float(
+                parameters.get("SimilarityThresholdSlider", default_threshold)
+                if parameters is not None
+                else default_threshold
+            )
+            embedding = target_face.embedding_store.get(recognition_model)
+            cropped_face = getattr(target_face, "cropped_face", None)
+            self._existing_faces_snapshot.append(
+                {
+                    "face_id": str(face_id),
+                    "embedding": embedding.copy()
+                    if isinstance(embedding, numpy.ndarray)
+                    else None,
+                    "cropped_face": cropped_face.copy()
+                    if isinstance(cropped_face, numpy.ndarray)
+                    else None,
+                    "threshold": threshold,
+                }
+            )
+
+    def cancel(self):
+        self._cancel_event.set()
+
+    def run(self):
+        self.main_window.models_processor.activate_device_for_current_thread()
+        try:
+            result = self.main_window.video_processor.scan_unique_faces(
+                mode_key=self.mode_key,
+                control_snapshot=self._control_snapshot,
+                existing_faces_snapshot=self._existing_faces_snapshot,
+                discovery_threshold=self._discovery_threshold,
+                progress_callback=lambda processed,
+                total,
+                frame,
+                unique,
+                scan_fps: self.progress.emit(processed, total, frame, unique, scan_fps),
+                is_cancelled=self._cancel_event.is_set,
+            )
+            self.completed.emit(result)
+        except Exception as exc:
+            print(f"[ERROR] FaceScanWorker failed to run: {exc}")
+            traceback.print_exc()
+            self.failed.emit(str(exc))
+
+
 class InputFacesLoaderWorker(qtc.QThread):
     # Define signals to emit when loading is done or if there are updates - Changed to QImage
     thumbnail_ready = qtc.Signal(str, numpy.ndarray, object, QImage, str)

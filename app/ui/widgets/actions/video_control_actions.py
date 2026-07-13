@@ -1063,26 +1063,46 @@ def _restore_issue_scan_display(main_window: "MainWindow") -> None:
         process_current_frame()
 
 
-def is_issue_scan_active(main_window: "MainWindow") -> bool:
+def _is_issue_scan_worker_active(main_window: "MainWindow") -> bool:
     return bool(
         getattr(main_window, "scan_issue_worker", None) is not None
         or _get_issue_scan_ui_state(main_window).get("active", False)
     )
 
 
-def block_if_issue_scan_active(
+def is_scan_active(main_window: "MainWindow") -> bool:
+    """Return whether either of the mutually exclusive video scans is active."""
+    return bool(
+        _is_issue_scan_worker_active(main_window)
+        or getattr(main_window, "face_scan_worker", None) is not None
+    )
+
+
+def is_issue_scan_active(main_window: "MainWindow") -> bool:
+    """Compatibility entry point used by mutation guards across the UI."""
+    return is_scan_active(main_window)
+
+
+def block_if_scan_active(
     main_window: "MainWindow", action_name: str, parent=None
 ) -> bool:
-    if not is_issue_scan_active(main_window):
+    if not is_scan_active(main_window):
         return False
 
     common_widget_actions.create_and_show_toast_message(
         main_window,
         "Scan In Progress",
-        f"Cannot {action_name} while an issue scan is running.\nAbort the scan first, then retry the action.",
+        f"Cannot {action_name} while a video scan is running.\n"
+        "Abort the scan first, then retry the action.",
         style_type="warning",
     )
     return True
+
+
+def block_if_issue_scan_active(
+    main_window: "MainWindow", action_name: str, parent=None
+) -> bool:
+    return block_if_scan_active(main_window, action_name, parent)
 
 
 def _mark_pending_target_media_refresh(main_window: "MainWindow") -> None:
@@ -1128,7 +1148,12 @@ def _get_issue_scan_mutation_lock_targets(main_window: "MainWindow") -> list:
     targets = []
     for attr_name in (
         "findTargetFacesButton",
+        "scanTargetFacesButton",
         "clearTargetFacesButton",
+        "buttonMediaPlay",
+        "buttonMediaRecord",
+        "scanToolsToggleButton",
+        "runScanButton",
         "buttonTargetVideosPath",
         "buttonInputFacesPath",
         "targetVideosFilterMenuButton",
@@ -1144,6 +1169,7 @@ def _get_issue_scan_mutation_lock_targets(main_window: "MainWindow") -> list:
         "swapfacesButton",
         "editFacesButton",
         "targetVideosList",
+        "targetFacesList",
         "inputFacesList",
         "inputEmbeddingsList",
         "jobQueueList",
@@ -1192,6 +1218,11 @@ def _set_issue_scan_mutation_lock_state(
 
     for target, was_enabled in state.pop("mutation_lock_enabled_states", []):
         _set_ui_object_enabled_state(target, was_enabled)
+
+
+def set_scan_mutation_lock_state(main_window: "MainWindow", scan_active: bool) -> None:
+    """Share the same mutation lock between issue and unique-face scans."""
+    _set_issue_scan_mutation_lock_state(main_window, scan_active)
 
 
 def _set_issue_scan_tool_button_state(
@@ -1425,6 +1456,9 @@ def _handle_issue_scan_failed(main_window: "MainWindow", error_message: str):
 
 
 def run_issue_scan(main_window: "MainWindow"):
+    if block_if_scan_active(main_window, "start an issue scan"):
+        return
+
     video_processor = main_window.video_processor
     if not getattr(main_window, "target_faces", {}):
         common_widget_actions.create_and_show_messagebox(
@@ -1495,7 +1529,12 @@ def run_issue_scan(main_window: "MainWindow"):
         )
     )
     worker.completed.connect(
-        lambda issue_frames_by_face, frames_scanned, faces_with_issues, completed_scope_text, elapsed_seconds, cancelled: (
+        lambda issue_frames_by_face,
+        frames_scanned,
+        faces_with_issues,
+        completed_scope_text,
+        elapsed_seconds,
+        cancelled: (
             _handle_issue_scan_completed(
                 main_window,
                 issue_frames_by_face,

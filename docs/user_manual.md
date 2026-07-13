@@ -1,4 +1,4 @@
-﻿# VisoMaster Fusion - User Manual
+# VisoMaster Fusion - User Manual
 
 ---
 
@@ -97,6 +97,22 @@ The main window is divided into these main areas:
 ### 3.4 Loading Media
 
 Load target media from a folder, individual files, or available webcams. Load source faces separately through the Input Faces area on the left. Saved embeddings can also be loaded separately. Each source face becomes a face card that can be assigned to one or more detected faces in the target media.
+
+The compact **Output** row above the Target Media controls selects or opens the output directory without leaving the main workspace. It is synchronized with the output-folder control in Settings; changing either one immediately updates the other.
+
+#### 3.4.1 Scanning a Complete Video for Face Views
+
+**Find Faces** analyzes the current frame. For a full-video pass, use **Scan Video** in the target-face controls. The arrow side opens the mode menu, while the main side repeats the checked mode. The scan compares detected embeddings against existing target cards and only proposes face views that the current cards do not cover at the active similarity threshold. This catches a person at a difficult angle or expression while also surfacing other people who enter later.
+
+| Mode | Use |
+|---|---|
+| **Quick Scan** | Samples about two frames per second for a fast first pass. |
+| **Smart Scan** | The default; samples about six frames per second for a stronger balance of coverage and speed. |
+| **Every Frame** | Checks the complete clip when maximum coverage matters more than scan time. |
+
+Progress shows the current source frame, unique-view count, and scan speed. **Abort** stops safely and still lets you review partial results. In the review grid, all results start selected; uncheck other people or unnecessary views, then choose **Add Selected**. Added cards retain their source frame in the workspace/job data. Right-click one and choose **Go to Scan Source Frame** to inspect that moment again.
+
+The scan uses the active detector, confidence, maximum-face, recognition, rotation, landmark, and similarity settings. It has a 100-result safety limit. Existing target cards are treated as coverage seeds, so running the scan again does not simply duplicate them.
 
 ---
 
@@ -604,7 +620,7 @@ Playback and recording use toggle-style buttons. Related actions in the main win
 
 ### 14.2 Output Location
 
-By default, processed images and videos are saved to the selected output folder. The Settings tab includes additional output-routing options:
+By default, processed images and videos are saved to the selected output folder. Select it either from the **Output** row above Target Media or from Settings; these are synchronized views of the same folder. The Settings tab also includes additional output-routing options:
 
 | Option | Description |
 |---|---|
@@ -628,6 +644,8 @@ These options can be combined. For example, preserving source structure can recr
 | **Open Output Folder After Recording** | Automatically opens the output directory in your file explorer when recording stops. |
 
 ### 14.4 Playback Settings
+
+The compact **FPS** label directly below the Play button reports processed frames per second during video playback, recording, and webcam processing. It uses a smoothed rolling measurement so the value stays readable without hiding short performance changes.
 
 | Setting | Description |
 |---|---|

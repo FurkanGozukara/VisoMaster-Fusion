@@ -622,6 +622,11 @@ class TargetFaceCardButton(CardButton):
         self.face_id = face_id
         self.media_path = media_path
         self.cropped_face = cropped_face
+        self.scan_source_frame: int | None = None
+        self.scan_media_path = ""
+        self.scan_occurrences = 0
+        self.scan_mode_key = ""
+        self.scan_source_fps = 0.0
 
         self.embedding_store = (
             embedding_store  # Key: embedding_swap_model, Value: embedding
@@ -678,6 +683,78 @@ class TargetFaceCardButton(CardButton):
 
     def set_embedding(self, embedding_swap_model: str, embedding: np.ndarray):
         self.embedding_store[embedding_swap_model] = embedding
+
+    def set_scan_metadata(
+        self,
+        frame_number: int | None,
+        media_path: str = "",
+        occurrences: int = 0,
+        mode_key: str = "",
+        source_fps: float = 0.0,
+    ) -> None:
+        """Attach the source location for a face produced by a video scan."""
+        self.scan_source_frame = (
+            max(0, int(frame_number)) if frame_number is not None else None
+        )
+        self.scan_media_path = str(media_path or "")
+        self.scan_occurrences = max(0, int(occurrences))
+        self.scan_mode_key = str(mode_key or "")
+        self.scan_source_fps = max(0.0, float(source_fps or 0.0))
+
+        if self.scan_source_frame is None:
+            self.setToolTip("")
+            return
+
+        timestamp_seconds = (
+            self.scan_source_frame / self.scan_source_fps
+            if self.scan_source_fps > 0
+            else 0.0
+        )
+        minutes, seconds = divmod(timestamp_seconds, 60.0)
+        hours, minutes = divmod(int(minutes), 60)
+        timestamp = (
+            f"{hours:02d}:{minutes:02d}:{seconds:04.1f}"
+            if hours
+            else f"{minutes:02d}:{seconds:04.1f}"
+        )
+        mode_label = {
+            "quick": "Quick",
+            "smart": "Smart",
+            "thorough": "Every Frame",
+        }.get(self.scan_mode_key, "Video")
+        hit_label = "hit" if self.scan_occurrences == 1 else "hits"
+        self.setToolTip(
+            f"{mode_label} scan result | Frame {self.scan_source_frame} "
+            f"({timestamp}) | {self.scan_occurrences} sampled {hit_label}"
+        )
+
+    @staticmethod
+    def _paths_match(path_a: str, path_b: str) -> bool:
+        if not path_a or not path_b:
+            return False
+        return os.path.normcase(os.path.abspath(path_a)) == os.path.normcase(
+            os.path.abspath(path_b)
+        )
+
+    def go_to_scan_source_frame(self) -> None:
+        if self.scan_source_frame is None or not self.scan_media_path:
+            return
+
+        main_window = self.main_window
+        video_processor = main_window.video_processor
+        if not self._paths_match(video_processor.media_path, self.scan_media_path):
+            common_widget_actions.create_and_show_toast_message(
+                main_window,
+                "Source Video Not Loaded",
+                "Load the video used by this face scan, then try again.",
+                style_type="warning",
+            )
+            return
+
+        frame_number = min(
+            self.scan_source_frame, int(video_processor.max_frame_number or 0)
+        )
+        main_window.videoSeekSlider.setValue(frame_number)
 
     def get_embedding(self, embedding_swap_model: str) -> np.ndarray:
         """
@@ -1072,6 +1149,8 @@ class TargetFaceCardButton(CardButton):
         )
         self.remove_action = QtGui.QAction("Remove from List", self)
         self.remove_action.triggered.connect(self.remove_target_face_from_list)
+        self.go_to_source_frame_action = QtGui.QAction("Go to Scan Source Frame", self)
+        self.go_to_source_frame_action.triggered.connect(self.go_to_scan_source_frame)
         self.popMenu.addAction(self.parameters_copy_action)
         self.popMenu.addAction(self.parameters_paste_action)
         self.popMenu.addAction(self.save_parameters_action)
@@ -1081,6 +1160,9 @@ class TargetFaceCardButton(CardButton):
         self.popMenu.addAction(self.small_thumbnails_action)
         self.popMenu.addAction(self.large_thumbnails_action)
         self.popMenu.addSeparator()
+        if self.scan_source_frame is not None:
+            self.popMenu.addAction(self.go_to_source_frame_action)
+            self.popMenu.addSeparator()
         self.popMenu.addAction(self.remove_action)
 
     def on_context_menu(self, point):
@@ -1096,6 +1178,7 @@ class TargetFaceCardButton(CardButton):
             self.load_parameters_action.setEnabled(not scan_active)
             self.load_parameters_and_settings_action.setEnabled(not scan_active)
             self.remove_action.setEnabled(not scan_active)
+            self.go_to_source_frame_action.setEnabled(not scan_active)
             self.small_thumbnails_action.setChecked(current_face_size == (70, 70))
             self.large_thumbnails_action.setChecked(current_face_size == (96, 96))
             self._exec_context_menu(point)
@@ -1110,6 +1193,7 @@ class TargetFaceCardButton(CardButton):
                 "thumbnail_size_action_group",
                 "small_thumbnails_action",
                 "large_thumbnails_action",
+                "go_to_source_frame_action",
                 "remove_action",
             )
 

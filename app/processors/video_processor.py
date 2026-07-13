@@ -22,6 +22,11 @@ from PySide6.QtCore import QObject, QTimer, Signal, Slot
 # Internal project imports
 from app.processors.workers.frame_worker import FrameWorker
 from app.processors.video_utils.sequential_detector import SequentialDetector
+from app.processors.video_utils.face_scan import (
+    UniqueFaceClusterer,
+    build_face_scan_frame_numbers,
+    get_face_scan_mode,
+)
 from app.ui.widgets.actions import graphics_view_actions
 from app.ui.widgets.actions import common_actions as common_widget_actions
 from app.ui.widgets.actions import video_control_actions
@@ -3067,6 +3072,273 @@ class VideoProcessor(QObject):
         print(f"[INFO] Identified {len(segments)} continuous frame segment(s)")
 
         return segments
+
+    def _recognize_existing_face_for_unique_scan(
+        self,
+        cropped_face_bgr: numpy.ndarray,
+        recognition_model: str,
+    ) -> numpy.ndarray:
+        if (
+            not isinstance(cropped_face_bgr, numpy.ndarray)
+            or cropped_face_bgr.size == 0
+        ):
+            return numpy.array([])
+
+        image_bgr = numpy.ascontiguousarray(
+            cropped_face_bgr.astype("uint8", copy=False)
+        )
+        image_rgb = numpy.ascontiguousarray(image_bgr[..., ::-1])
+        image_tensor = (
+            torch.from_numpy(image_rgb)
+            .to(self.main_window.models_processor.device, non_blocking=True)
+            .permute(2, 0, 1)
+        )
+        height, width = image_rgb.shape[:2]
+        approximate_kps = numpy.array(
+            [
+                [0.30 * width, 0.40 * height],
+                [0.70 * width, 0.40 * height],
+                [0.50 * width, 0.55 * height],
+                [0.35 * width, 0.70 * height],
+                [0.65 * width, 0.70 * height],
+            ],
+            dtype=numpy.float32,
+        )
+        embedding, _ = self.main_window.models_processor.run_recognize_direct(
+            image_tensor,
+            approximate_kps,
+            "Auto",
+            recognition_model,
+        )
+        return embedding if isinstance(embedding, numpy.ndarray) else numpy.array([])
+
+    @staticmethod
+    def _advance_unique_face_scan_capture(
+        capture: cv2.VideoCapture,
+        next_frame_number: int,
+        target_frame_number: int,
+        source_fps: float,
+    ) -> bool:
+        gap = int(target_frame_number) - int(next_frame_number)
+        if gap < 0:
+            return misc_helpers.seek_frame(capture, int(target_frame_number))
+        if gap == 0:
+            return True
+
+        # Sequential grabs are faster for nearby samples and retain decoder
+        # accuracy. Larger gaps are cheaper as explicit seeks on long clips.
+        sequential_limit = max(30, int(round(source_fps * 2.0)))
+        if gap <= sequential_limit:
+            for _ in range(gap):
+                if not capture.grab():
+                    return False
+            return True
+        return misc_helpers.seek_frame(capture, int(target_frame_number))
+
+    def scan_unique_faces(
+        self,
+        mode_key: str,
+        control_snapshot: dict,
+        existing_faces_snapshot: list[dict],
+        discovery_threshold: float,
+        progress_callback=None,
+        is_cancelled=None,
+        max_results: int = 100,
+    ) -> dict:
+        """Scan representative frames and return views not covered by target faces."""
+        if not self.media_path or not Path(self.media_path).is_file():
+            raise RuntimeError("The selected video could not be found on disk.")
+
+        capture = cv2.VideoCapture(self.media_path)
+        if not capture or not capture.isOpened():
+            raise RuntimeError("Could not open the selected video for face scanning.")
+
+        source_fps = float(capture.get(cv2.CAP_PROP_FPS))
+        if source_fps <= 0:
+            source_fps = float(self.fps) if self.fps > 0 else 30.0
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count <= 0:
+            frame_count = int(self.max_frame_number) + 1
+        sample_frames = build_face_scan_frame_numbers(frame_count, source_fps, mode_key)
+        if not sample_frames:
+            misc_helpers.release_capture(capture)
+            raise RuntimeError("The selected video contains no readable frames.")
+
+        control = copy.deepcopy(control_snapshot)
+        recognition_model = str(
+            control.get("RecognitionModelSelection", "Inswapper128ArcFace")
+        )
+        existing_representatives: list[tuple[numpy.ndarray, float]] = []
+        for face_snapshot in existing_faces_snapshot:
+            embedding = face_snapshot.get("embedding")
+            if not isinstance(embedding, numpy.ndarray) or embedding.size == 0:
+                embedding = self._recognize_existing_face_for_unique_scan(
+                    face_snapshot.get("cropped_face"), recognition_model
+                )
+            if isinstance(embedding, numpy.ndarray) and embedding.size > 0:
+                existing_representatives.append(
+                    (embedding, float(face_snapshot.get("threshold", 60.0)))
+                )
+
+        clusterer = UniqueFaceClusterer(
+            threshold=float(discovery_threshold),
+            existing_representatives=existing_representatives,
+            max_results=max_results,
+        )
+        processed_samples = 0
+        faces_examined = 0
+        unreadable_samples = 0
+        next_capture_frame = 0
+        target_height = self._get_target_input_height_for_control(control)
+        cancelled = False
+        result_limit_reached = False
+        start_time = time.monotonic()
+
+        try:
+            for frame_number in sample_frames:
+                if is_cancelled and is_cancelled():
+                    cancelled = True
+                    break
+
+                positioned = self._advance_unique_face_scan_capture(
+                    capture,
+                    next_capture_frame,
+                    frame_number,
+                    source_fps,
+                )
+                ret, frame_bgr = (False, None)
+                if positioned:
+                    ret, frame_bgr = misc_helpers.read_frame(
+                        capture,
+                        self.media_rotation,
+                        preview_target_height=target_height,
+                    )
+                    next_capture_frame = frame_number + 1
+
+                if not ret or not isinstance(frame_bgr, numpy.ndarray):
+                    unreadable_samples += 1
+                    next_capture_frame = frame_number + 1
+                    misc_helpers.seek_frame(capture, next_capture_frame)
+                else:
+                    frame_rgb = numpy.ascontiguousarray(frame_bgr[..., ::-1])
+                    frame_tensor = (
+                        torch.from_numpy(frame_rgb.astype("uint8", copy=False))
+                        .to(
+                            self.main_window.models_processor.device,
+                            non_blocking=True,
+                        )
+                        .permute(2, 0, 1)
+                    )
+                    if control.get("ManualRotationEnableToggle", False):
+                        from torchvision.transforms import v2
+
+                        frame_tensor = v2.functional.rotate(
+                            frame_tensor,
+                            angle=float(control.get("ManualRotationAngleSlider", 0)),
+                            interpolation=v2.InterpolationMode.BILINEAR,
+                            expand=True,
+                        )
+
+                    bboxes, kpss_5, _ = self.main_window.models_processor.run_detect(
+                        frame_tensor,
+                        control.get("DetectorModelSelection", "RetinaFace"),
+                        max_num=int(control.get("MaxFacesToDetectSlider", 20)),
+                        score=float(control.get("DetectorScoreSlider", 50)) / 100.0,
+                        input_size=(512, 512),
+                        use_landmark_detection=bool(
+                            control.get("LandmarkDetectToggle", False)
+                        ),
+                        landmark_detect_mode=control.get(
+                            "LandmarkDetectModelSelection", "203"
+                        ),
+                        landmark_score=float(
+                            control.get("LandmarkDetectScoreSlider", 50)
+                        )
+                        / 100.0,
+                        from_points=bool(control.get("DetectFromPointsToggle", False)),
+                        rotation_angles=[0]
+                        if not control.get("AutoRotationToggle", False)
+                        else [0, 90, 180, 270],
+                        bypass_bytetrack=True,
+                        control_override=control,
+                    )
+
+                    max_faces = min(len(bboxes), len(kpss_5))
+                    for face_index in range(max_faces):
+                        if is_cancelled and is_cancelled():
+                            cancelled = True
+                            break
+                        face_bbox = bboxes[face_index]
+                        face_kps = kpss_5[face_index]
+                        if not misc_helpers.is_detected_face_eligible_for_matching(
+                            face_kps,
+                            face_bbox,
+                            FrameWorker._MIN_FACE_PIXELS,
+                        ):
+                            continue
+                        embedding, cropped_rgb = (
+                            self.main_window.models_processor.run_recognize_direct(
+                                frame_tensor,
+                                face_kps,
+                                "Auto",
+                                recognition_model,
+                            )
+                        )
+                        if (
+                            not isinstance(embedding, numpy.ndarray)
+                            or embedding.size == 0
+                            or cropped_rgb is None
+                        ):
+                            continue
+                        cropped_bgr = numpy.ascontiguousarray(
+                            cropped_rgb.detach().cpu().numpy()[..., ::-1]
+                        )
+                        face_width = max(0.0, float(face_bbox[2] - face_bbox[0]))
+                        face_height = max(0.0, float(face_bbox[3] - face_bbox[1]))
+                        cluster_result = clusterer.consider(
+                            embedding,
+                            cropped_bgr,
+                            frame_number,
+                            face_width * face_height,
+                        )
+                        faces_examined += 1
+                        if cluster_result == "limit":
+                            result_limit_reached = True
+                            break
+                    del frame_tensor
+
+                processed_samples += 1
+                if progress_callback:
+                    elapsed = max(time.monotonic() - start_time, 1e-6)
+                    progress_callback(
+                        processed_samples,
+                        len(sample_frames),
+                        frame_number,
+                        len(clusterer.clusters),
+                        processed_samples / elapsed,
+                    )
+                if cancelled or result_limit_reached:
+                    break
+        finally:
+            misc_helpers.release_capture(capture)
+
+        elapsed_seconds = time.monotonic() - start_time
+        mode = get_face_scan_mode(mode_key)
+        return {
+            "candidates": clusterer.results(recognition_model, source_fps),
+            "mode_key": mode.key,
+            "mode_label": mode.label,
+            "sample_frames": len(sample_frames),
+            "samples_scanned": processed_samples,
+            "faces_examined": faces_examined,
+            "unreadable_samples": unreadable_samples,
+            "elapsed_seconds": elapsed_seconds,
+            "cancelled": cancelled,
+            "limit_reached": clusterer.limit_reached,
+            "rejected_unique_count": clusterer.rejected_unique_count,
+            "source_fps": source_fps,
+            "media_path": self.media_path,
+        }
 
     def _get_issue_scan_ranges(self) -> List[Tuple[int, int]]:
         """Return the frame ranges that a scan should inspect."""
