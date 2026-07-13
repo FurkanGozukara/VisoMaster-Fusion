@@ -608,7 +608,7 @@ class LauncherWindow(QtWidgets.QWidget):
         changed = git_changed_files(True)
         if not changed:
             QtWidgets.QMessageBox.information(self, "Repair", "No files to restore.")
-            print("[Launcher] Repair skipped — no changed files.")
+            print("[Launcher] Repair skipped - no changed files.")
             return
 
         print(f"[Launcher] Repairing installation ({len(changed)} file(s))...")

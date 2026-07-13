@@ -275,14 +275,18 @@ class FrameWorker(threading.Thread):
         - In Pool Mode: Loops, gets tasks from self.frame_queue, calls process_and_emit_task().
         - In Single-Frame Mode: Calls process_and_emit_task() just once.
         """
+        self.main_window.models_processor.activate_device_for_current_thread()
+
         if self.is_pool_worker:
             # --- Pool Worker Mode ---
             while not self.stop_event.is_set():
                 task = None  # Ensure task is defined for 'finally'
+                queue_item_acquired = False
                 try:
                     # Block until a task is available or a poison pill is received
                     # Use a timeout to periodically check the stop_event
                     task = self.frame_queue.get(timeout=1.0)
+                    queue_item_acquired = True
 
                     if task is None:
                         # Poison pill received: Exit the loop
@@ -324,7 +328,10 @@ class FrameWorker(threading.Thread):
 
                 finally:
                     # This block executes *no matter what* (success, exception, or break)
-                    if task is not None and self.frame_queue is not None:
+                    # Poison pills are real queue items too.  Skipping task_done() for
+                    # ``None`` leaves Queue.unfinished_tasks permanently positive and
+                    # makes the next recording wait for the 8-second tail-stall fallback.
+                    if queue_item_acquired and self.frame_queue is not None:
                         try:
                             self.frame_queue.task_done()
                         except ValueError:
@@ -482,7 +489,7 @@ class FrameWorker(threading.Thread):
                 )
                 print(
                     "[FATAL] CUDA context may be corrupted. If this persists, open "
-                    "Launcher → Update / Maintenance → switch provider (TensorRT ↔ CUDA) "
+                    "Launcher > Update / Maintenance > switch provider (TensorRT or CUDA) "
                     "or rebuild the TensorRT engines."
                 )
             else:
@@ -1672,8 +1679,8 @@ class FrameWorker(threading.Thread):
                 # Improvement H: log faces that are detected but cannot be swapped
                 # (landmark detection failed even after retry and stereo fallback).
                 print(
-                    f"[VR] Skipping face at theta={_fd['theta']:.1f}° phi={_fd['phi']:.1f}° "
-                    f"({_fd['original_eye_side']}) — landmark detection failed."
+                    f"[VR] Skipping face at theta={_fd['theta']:.1f} degrees phi={_fd['phi']:.1f} degrees "
+                    f"({_fd['original_eye_side']}) - landmark detection failed."
                 )
                 del _fd["face_crop_tensor"]
                 continue
@@ -3884,7 +3891,7 @@ class FrameWorker(threading.Thread):
         # Quality check: Alert if output is abnormally dark (potential VRAM/Model issue)
         if output.abs().max() < 30.0:
             print(
-                "[WARN] Swap model output near-zero for face — possible VRAM pressure"
+                "[WARN] Swap model output near-zero for face - possible VRAM pressure"
             )
 
         # Prepare final CHW tensor and resize back to canonical template size (512)

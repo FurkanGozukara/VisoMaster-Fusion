@@ -711,17 +711,17 @@ def get_video_rotation(media_path: str) -> int:
 
                 # Align to standard angles
                 if 85 <= rotation_angle <= 95:
-                    print("[INFO] Detected video rotation: 90°")
+                    print("[INFO] Detected video rotation: 90 degrees")
                     return 90
                 elif 175 <= rotation_angle <= 185:
-                    print("[INFO] Detected video rotation: 180°")
+                    print("[INFO] Detected video rotation: 180 degrees")
                     return 180
                 elif 265 <= rotation_angle <= 275:
-                    print("[INFO] Detected video rotation: 270°")
+                    print("[INFO] Detected video rotation: 270 degrees")
                     return 270
                 elif rotation_angle != 0:
                     print(
-                        f"[INFO] Found rotation '{rotation_angle}°', but ignoring non-standard angle."
+                        f"[INFO] Found rotation '{rotation_angle} degrees', but ignoring non-standard angle."
                     )
 
             except (ValueError, TypeError):
@@ -1004,6 +1004,7 @@ def get_output_file_path(
     temp_path = Path(input_filename)
 
     output_base_name = None
+    generated_fallback_name = False
 
     # --- Filename Priority Logic ---
     # Priority 1: Use the specific `output_file_name` if provided and not overridden by the job name flag.
@@ -1015,6 +1016,7 @@ def get_output_file_path(
     # Priority 3 (Fallback): Use the original filename with a timestamp to ensure uniqueness.
     else:
         output_base_name = f"{temp_path.stem}_{date_and_time}"
+        generated_fallback_name = True
 
     # --- Extension Logic ---
     if media_type == "video":
@@ -1030,6 +1032,18 @@ def get_output_file_path(
     # --- Final Path Construction ---
     output_filename = f"{output_base_name}{extension}"
     output_file_path = os.path.join(output_folder, output_filename)
+    # Timestamp precision is one second. Sequential batch actions can therefore
+    # target the same fallback name and silently overwrite a just-created result.
+    # Preserve explicit job/output names for callers that deliberately control the
+    # path, but make automatically generated names collision-free.
+    if generated_fallback_name and os.path.exists(output_file_path):
+        suffix = 2
+        while True:
+            output_filename = f"{output_base_name}_{suffix}{extension}"
+            output_file_path = os.path.join(output_folder, output_filename)
+            if not os.path.exists(output_file_path):
+                break
+            suffix += 1
     return output_file_path
 
 

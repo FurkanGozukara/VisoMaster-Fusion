@@ -235,6 +235,17 @@ def find_target_faces(main_window: "MainWindow"):
                         control.get("RecognitionModelSelection", "arcface_128"),
                     )
                 )
+                # Recognition can fail cleanly when a model cannot be loaded (for
+                # example, transient GPU-memory pressure from another process).
+                # Do not turn that recoverable condition into an AttributeError
+                # below when the target-face thumbnail is constructed.
+                if (
+                    face_emb is None
+                    or not isinstance(face_emb, numpy.ndarray)
+                    or face_emb.size == 0
+                    or cropped_img is None
+                ):
+                    continue
                 faces_list.append([face_kps, face_emb, cropped_img, img])
 
             if faces_list:

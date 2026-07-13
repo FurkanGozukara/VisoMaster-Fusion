@@ -211,7 +211,7 @@ def check_models_presence() -> tuple[bool, list[str]]:
         model_path = Path(local_path)
         if not model_path.exists():
             missing.append(str(model_path))
-            print(f"[Launcher] Warning: Missing model file → {model_path}")
+            print(f"[Launcher] Warning: Missing model file: {model_path}")
     return bool(missing), missing
 
 

@@ -233,6 +233,7 @@ class IssueScanWorker(qtc.QThread):
         self._cancel_event.set()
 
     def run(self):
+        self.main_window.models_processor.activate_device_for_current_thread()
         try:
             if self._cancel_event.is_set():
                 self.cancelled.emit()
@@ -313,6 +314,7 @@ class InputFacesLoaderWorker(qtc.QThread):
         """
         Main worker thread execution. Loads models first, then processes files.
         """
+        self.main_window.models_processor.activate_device_for_current_thread()
         try:
             # Proceed with file processing now that models are ready.
             if self.folder_name or self.files_list:

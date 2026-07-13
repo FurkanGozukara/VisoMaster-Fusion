@@ -50,7 +50,7 @@ def download_file(
     if Path(file_path).is_file():
         if skip_hash_check:
             print(
-                f"\n[INFO] Skipping '{model_name}': file exists (hash check skipped — optimized models mode)."
+                f"\n[INFO] Skipping '{model_name}': file exists (hash check skipped - optimized models mode)."
             )
             return True
         if check_file_integrity(file_path, correct_hash):

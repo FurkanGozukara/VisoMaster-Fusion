@@ -553,7 +553,8 @@ class FFmpegPostProcessor:
 
             try:
                 print(
-                    f"[INFO] Extracting audio segment {idx + 1}/{len(segments)}: {start_time:.3f}s → {end_time:.3f}s"
+                    f"[INFO] Extracting audio segment {idx + 1}/{len(segments)}: "
+                    f"{start_time:.3f}s to {end_time:.3f}s"
                 )
                 subprocess.run(args, check=True, capture_output=True, text=True)
 
@@ -633,7 +634,7 @@ class FFmpegPostProcessor:
         try:
             print(f"[INFO] Concatenating {len(audio_files)} audio segment(s)...")
             subprocess.run(args, check=True)
-            print("[INFO] ✓ Successfully concatenated audio segments")
+            print("[INFO] Successfully concatenated audio segments")
             return output_audio
         except Exception as e:
             print(f"[ERROR] Failed to concatenate audio segments: {e}")

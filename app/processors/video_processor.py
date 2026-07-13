@@ -511,6 +511,8 @@ class VideoProcessor(QObject):
         This function runs in a separate thread (self.feeder_thread).
         Its only job is to read frames from the source and send them to the workers.
         """
+        self.main_window.models_processor.activate_device_for_current_thread()
+
         print(
             f"[INFO] Feeder thread started (Mode: {self.file_type}, Segments: {self.is_processing_segments})."
         )
@@ -4480,6 +4482,16 @@ class VideoProcessor(QObject):
             return
 
         print("[INFO] --- Initializing multi-segment recording... ---")
+
+        # Segment recording consumes source-frame ranges directly, so it must
+        # use the source rate rather than any custom playback rate left in
+        # ``self.fps``.  Keep the original rate separately for audio timing.
+        source_fps = float(self.media_capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        if source_fps <= 0:
+            source_fps = 30.0
+        self.recording_source_fps = source_fps
+        self.fps = source_fps
+        self._used_ffmpeg_cap = False
 
         # 2. Set State Flags
         self.is_processing_segments = True

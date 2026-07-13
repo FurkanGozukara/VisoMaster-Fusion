@@ -803,7 +803,7 @@ def handle_auto_mouth_toggle(main_window: "MainWindow", new_value: bool) -> None
     detector = MouthActionDetector.get()
     if not detector.available:
         err = detector.load_error or "unknown error"
-        print(f"[WARN] Auto Mouth Expression: detector unavailable — {err}")
+        print(f"[WARN] Auto Mouth Expression: detector unavailable - {err}")
     else:
         print("[INFO] Auto Mouth Expression enabled. Mouth action detector ready.")
 

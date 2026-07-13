@@ -525,6 +525,18 @@ class ModelsProcessor(QtCore.QObject):
         self.rgb_to_linear_rgb_converter = None
         self.linear_rgb_to_rgb_converter = None
 
+    def activate_device_for_current_thread(self) -> None:
+        """Bind Torch CUDA work in the calling thread to this processor's GPU.
+
+        CUDA's current-device selection is thread-local. Qt workers, feeder threads,
+        and frame-pool threads therefore start on device 0 even when the application
+        was launched with ``--gpu-id 1``. Explicit tensor device arguments cover most
+        operations, but native CUDA extensions such as TorchVision NMS still consult
+        the calling thread's current device while launching kernels.
+        """
+        if self.device_type != "cpu" and torch.cuda.is_available():
+            torch.cuda.set_device(self.gpu_id)
+
     @property
     def binding_device_id(self) -> int:
         return self.gpu_id if self.device_type != "cpu" else 0
