@@ -1,5 +1,9 @@
 # VisoMaster Fusion and VisoMaster Automatic Installer - The Most Advanced 0-Shot Face Swap / Deep Fake APP - State of the Art - Windows and Massed Compute - Portable Installers
 
+## App installer and download link : https://www.patreon.com/SECourses/posts/visomaster-and-0-121570322
+
+### App zip file link : https://www.patreon.com/SECourses/posts/visomaster-and-0-121570322
+
 1-Click to install VisoMaster Fusion (newer and much better) and classic VisoMaster on Windows and Massed Compute. These state-of-the-art face-swap / deepfake apps have a newer interface and faster processing, plus portable 1-click Windows installers for NVIDIA RTX 1000 through RTX 5000 series GPUs.
 
 Use the [Patreon exclusive posts index](https://github.com/FurkanGozukara/Stable-Diffusion/blob/main/Patreon-Posts-Index.md) to find scripts quickly, the [Patreon scripts updates history](https://github.com/FurkanGozukara/Stable-Diffusion/blob/main/Patreon-Posts-Index.md) to see which scripts changed, and the [Patreon special generative scripts list](https://github.com/FurkanGozukara/Stable-Diffusion/blob/main/Amazing-Generative-AI-Scripts.md) for additional workflows.
