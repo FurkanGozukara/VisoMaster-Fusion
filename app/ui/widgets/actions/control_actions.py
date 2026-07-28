@@ -822,6 +822,55 @@ def update_video_slider_step(main_window: "MainWindow", new_step) -> None:
         main_window.videoSeekSlider.setPageStep(step_val)
 
 
+def refresh_dfm_models(main_window: "MainWindow", *_args) -> None:
+    """Rescans ``model_assets/dfm_models`` and repopulates the DFM dropdown.
+
+    Lets a user drop a new ``.dfm`` file in (or reorganise the folder) without
+    restarting the app.  The current selection is preserved when it still
+    exists; otherwise the first available model is selected.
+    """
+    manager = main_window.dfm_model_manager
+    previous = manager.get_selection_values()
+    manager.refresh_models()
+    values = manager.get_selection_values()
+
+    widget = main_window.parameter_widgets.get("DFMModelSelection")
+    if widget is None:
+        return
+
+    current = widget.currentText()
+    widget.blockSignals(True)
+    try:
+        widget.clear()
+        widget.addItems(values)
+        widget.selection_values = values
+        if current in values:
+            widget.setCurrentText(current)
+        elif values:
+            widget.setCurrentText(values[0])
+    finally:
+        widget.blockSignals(False)
+
+    new_selection = widget.currentText()
+    if new_selection != current:
+        common_widget_actions.update_parameter(
+            main_window, "DFMModelSelection", new_selection, enable_refresh_frame=True
+        )
+
+    added = len(set(values) - set(previous))
+    removed = len(set(previous) - set(values))
+    print(
+        f"[INFO] DFM models refreshed: {len(values)} found"
+        + (f" (+{added} new)" if added else "")
+        + (f" (-{removed} missing)" if removed else "")
+    )
+    common_widget_actions.create_and_show_toast_message(
+        main_window,
+        "DFM Models",
+        f"{len(values)} model(s) found in {manager.models_path}",
+    )
+
+
 def handle_face_reaging_toggle_change(
     main_window: "MainWindow", new_value: bool
 ) -> None:

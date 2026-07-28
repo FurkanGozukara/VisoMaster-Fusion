@@ -739,6 +739,48 @@ class FrameWorker(threading.Thread):
             original_face_128,
         )
 
+    def get_transformed_face(
+        self,
+        matrix: np.ndarray,
+        img: torch.Tensor,
+        output_size: int,
+        interp_mode: str = "bilinear",
+    ) -> torch.Tensor:
+        """
+        Warps the full frame into a single square crop of arbitrary size.
+
+        Unlike ``get_transformed_and_scaled_faces`` this takes a raw 2x3 affine
+        matrix rather than a fitted ``SimilarityTransform``, and produces exactly
+        one crop.  Used by the DFM path, which needs the face warped directly at
+        the model's native resolution instead of via the 512 intermediate.
+
+        Args:
+            img:         Full-frame CHW tensor.
+            matrix:      2x3 affine mapping frame coordinates to the crop.
+            output_size: Side length in pixels of the square crop.
+            interp_mode: Interpolation mode for warp_affine.
+
+        Returns:
+            CHW tensor in the same dtype as *img*.
+        """
+        m_tensor = (
+            torch.from_numpy(np.ascontiguousarray(np.asarray(matrix)[0:2]))
+            .float()
+            .unsqueeze(0)
+            .to(img.device)
+        )
+        img_b = img.unsqueeze(0) if img.dim() == 3 else img
+        warped = kgm.warp_affine(
+            img_b.float(),
+            m_tensor,
+            dsize=(output_size, output_size),
+            mode=interp_mode,
+            align_corners=True,
+        ).squeeze(0)
+        if img.dtype == torch.uint8:
+            warped = warped.clamp(0, 255)
+        return warped.to(img.dtype)
+
     @staticmethod
     def _is_kps_valid(kps: np.ndarray, img_h: int, img_w: int) -> bool:
         """Returns False if any keypoint is NaN, Inf, or outside image bounds."""

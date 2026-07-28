@@ -43,5 +43,7 @@ startup_parameters*.json
 tensorrt-engines/
 test_frames*/
 test_videos*/
+tests/integration/_artifacts/
 presets/
 temp_files/
+tests/

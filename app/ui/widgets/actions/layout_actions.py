@@ -176,8 +176,18 @@ def add_widgets_to_tab_layout(
                 widget.reset_default_button = (
                     widget_components.ParameterResetDefaultButton(related_widget=widget)
                 )
+                _selection_row_widgets: list = [
+                    label,
+                    widget,
+                    widget.reset_default_button,
+                ]
+                if "action_button" in widget_data:
+                    _sel_ab_data: dict = cast(dict, widget_data["action_button"])
+                    _selection_row_widgets.append(
+                        create_layout_action_button(_sel_ab_data)
+                    )
                 row_widget, horizontal_layout = add_horizontal_layout_to_category(
-                    category_layout, label, widget, widget.reset_default_button
+                    category_layout, *_selection_row_widgets
                 )
 
                 if data_type == "parameter":

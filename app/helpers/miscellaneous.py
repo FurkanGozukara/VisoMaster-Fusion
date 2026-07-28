@@ -188,9 +188,13 @@ class DFMModelManager:
     """
     Manages the discovery and retrieval of DeepFace Model (DFM) files.
 
-    This class scans a specified directory for .dfm and .onnx model files,
-    making them available for use in the application, for example, in UI dropdowns.
+    Scans ``model_assets/dfm_models`` (including sub-folders) for ``.dfm`` and
+    ``.onnx`` files and makes them available to the application, for example in
+    UI dropdowns.  Models in sub-folders are listed with their relative path so
+    a collection can be organised by person, resolution, or trainer.
     """
+
+    MODEL_EXTENSIONS: tuple[str, ...] = (".dfm", ".onnx")
 
     def __init__(self, models_path: str = "./model_assets/dfm_models"):
         """
@@ -205,29 +209,60 @@ class DFMModelManager:
 
     def refresh_models(self) -> None:
         """
-        Scans the model directory and updates the internal dictionary of found models.
+        Rescans the model directory (recursively) and rebuilds the model index.
+
+        Names are the path relative to the models directory, so ``Alice/x.dfm``
+        and ``Bob/x.dfm`` remain distinguishable.  Entries are sorted so the
+        dropdown order is stable across runs.
         """
         self.models_data.clear()
         if not os.path.isdir(self.models_path):
             print(f"[WARN] DFM models directory not found at: {self.models_path}")
             return
 
-        for dfm_file in os.listdir(self.models_path):
-            if dfm_file.endswith((".dfm", ".onnx")):
-                self.models_data[dfm_file] = os.path.join(self.models_path, dfm_file)
+        found: Dict[str, str] = {}
+        for root, _dirs, files in os.walk(self.models_path):
+            for dfm_file in files:
+                if not dfm_file.lower().endswith(self.MODEL_EXTENSIONS):
+                    continue
+                full_path = os.path.join(root, dfm_file)
+                rel_name = os.path.relpath(full_path, self.models_path).replace(
+                    os.sep, "/"
+                )
+                found[rel_name] = full_path
+
+        for name in sorted(found, key=str.lower):
+            self.models_data[name] = found[name]
 
     def get_models_data(self) -> dict:
-        """Returns the dictionary mapping model filenames to their full paths."""
+        """Returns the dictionary mapping model names to their full paths."""
         return self.models_data
 
     def get_selection_values(self) -> list:
-        """Returns a list of model filenames for use in selection widgets."""
+        """Returns a list of model names for use in selection widgets."""
         return list(self.models_data.keys())
 
     def get_default_value(self) -> str:
-        """Returns the filename of the first model found, or an empty string."""
+        """Returns the name of the first model found, or an empty string."""
         dfm_values = self.get_selection_values()
         return dfm_values[0] if dfm_values else ""
+
+    def get_model_path(self, model_name: str) -> str | None:
+        """Resolves a model name to its path, tolerating renames and moves.
+
+        Falls back to matching on the bare filename so a workspace saved before
+        a model was moved into a sub-folder still resolves.
+        """
+        if not model_name:
+            return None
+        path = self.models_data.get(model_name)
+        if path:
+            return path
+        basename = os.path.basename(model_name).lower()
+        for name, candidate in self.models_data.items():
+            if os.path.basename(name).lower() == basename:
+                return candidate
+        return None
 
 
 # Datatype used for storing parameter values

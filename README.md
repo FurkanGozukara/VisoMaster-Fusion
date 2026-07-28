@@ -246,6 +246,24 @@ Open the **Swapper** section in Face Swap. The visible model menu contains ten c
   <figcaption>Model, resolution, alignment, and match threshold form the identity engine. Test them before piling on restoration.</figcaption>
 </figure>
 
+### DeepFaceLive (DFM) models
+
+Selecting **DeepFaceLive (DFM)** switches the swapper to a pretrained, person-specific DeepFaceLab model instead of a 0-shot embedding. No source face or embedding is needed — the identity lives inside the `.dfm` file itself.
+
+**Installing models.** Drop `.dfm` (or exported `.onnx`) files into `model_assets/dfm_models`. Sub-folders are scanned too, so you can organise a collection by person or resolution, and two models with the same filename in different folders stay distinct. Press **Refresh** next to the DFM Model dropdown to pick up new files without restarting the app.
+
+**DFM Alignment.** DFM models are trained on faces extracted by DeepFaceLab, which frames the head far wider than the ArcFace crop the other swappers use. With **DFL (DeepFaceLab)** selected (the default) the face is warped straight from the source frame using DeepFaceLab's own alignment maths, at the model's native input resolution — correct proportions and one less resampling stage than routing through the 512 crop. **Legacy (ArcFace crop)** restores the previous behaviour if you want to compare.
+
+- **DFM Face Coverage** — how much of the head the crop contains, using DeepFaceLive's coverage scale. `1.60` = DFL `full_face`, `2.13` = `whole_face` (the default; almost every published DFM model is trained this way), `2.98` = `head`. If a model looks zoomed in or out compared to DeepFaceLive, this is the control to change.
+- **DFM X / Y Offset** — nudge the crop, in units of the aligned face size. The default Y of `-0.07` is the exact forehead adjustment DeepFaceLab applies for `whole_face` extraction.
+- **Use 68-Point Alignment** — when the active landmark detector already outputs 68 points, fit the crop with DeepFaceLab's exact 33-landmark template rather than the 5-point approximation. Costs nothing extra; turn it off if you want framing that is identical regardless of which landmark model is active.
+
+**Use DFM Model Mask.** DFM models output their own face masks alongside the generated face, and DeepFaceLive blends with them. Enabling this (the default) restricts the paste to the region the model actually synthesised instead of the whole square crop, with **Erode** and **Blur** to tighten or feather the edge. It multiplies with Occluder, XSeg, Face Parser and the border masks rather than replacing them, so all the usual mask tools still apply on top.
+
+**AMP Morph Factor** only affects AMP-type DFM models (those with a second `morph_value` input); it is ignored by standard models. **RCT Color Transfer** matches the generated face's colour statistics to the original before blending.
+
+Model memory is governed by **Maximum DFM Models to use** in Settings. Each loaded model is large, so keep this at 1 unless you are switching between models frequently and have VRAM to spare.
+
 ### Strength, anti-drift, and likeness
 
 The **Strength** feature repeats or intensifies the swap up to 500%. Around 200% can help a weak identity, but repeated swaps can drift or flatten texture. **Mode 2 (Anti-Drift & Texture)** uses phase-correlation and frequency-separation logic to stabilize geometry and preserve skin texture during multiple passes. An amount of zero deliberately bypasses swapping while allowing the rest of the pipeline to process the original face.

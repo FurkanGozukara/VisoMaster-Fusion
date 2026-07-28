@@ -845,8 +845,11 @@ class ModelsProcessor(QtCore.QObject):
                 ):
                     trt_options = dict(dfm_providers[0][1])
 
-                    # 1. Clean the filename to create a safe string
-                    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "", dfm_model)
+                    # 1. Clean the name to create a safe string.  Path
+                    # separators become underscores rather than being dropped,
+                    # so "alice/model.dfm" and "bob/model.dfm" keep separate
+                    # engine caches instead of colliding on "model".
+                    safe_name = re.sub(r"[^A-Za-z0-9_.-]", "_", dfm_model)
                     if safe_name.lower().endswith(".dfm"):
                         safe_name = safe_name[:-4]
 
@@ -873,14 +876,31 @@ class ModelsProcessor(QtCore.QObject):
 
                     dfm_providers[0] = ("TensorrtExecutionProvider", trt_options)
 
-                self.dfm_models[dfm_model] = DFMModel(
-                    self.main_window.dfm_model_manager.get_models_data()[dfm_model],
+                model_path = self.main_window.dfm_model_manager.get_model_path(
+                    dfm_model
+                )
+                if not model_path:
+                    raise FileNotFoundError(
+                        f"DFM model '{dfm_model}' is no longer present in "
+                        f"{self.main_window.dfm_model_manager.models_path}. "
+                        "Use the Refresh button next to the DFM Model dropdown."
+                    )
+
+                instance = DFMModel(
+                    model_path,
                     dfm_providers,
                     self.device,
                     self.gpu_id,
                 )
-            except Exception:
-                print(f"[ERROR] Failed to load DFM model {dfm_model}.")
+                instance._dfm_filename_fallback = dfm_model
+                width, height = instance.get_input_res()
+                print(
+                    f"[INFO] Loaded DFM model '{dfm_model}' "
+                    f"({width}x{height}, {'AMP' if instance.has_morph_value() else 'standard'})"
+                )
+                self.dfm_models[dfm_model] = instance
+            except Exception as e:
+                print(f"[ERROR] Failed to load DFM model {dfm_model}: {e}")
                 traceback.print_exc()
                 self.dfm_models[dfm_model] = None
             finally:

@@ -1,7 +1,7 @@
 import math
 import re
 from math import ceil
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
@@ -12,7 +12,7 @@ import kornia.enhance as ke
 import kornia.color as kc
 import kornia.geometry.transform as kgm
 
-from app.processors.utils import faceutil
+from app.processors.utils import dfl_align, faceutil
 
 if TYPE_CHECKING:
     # Forward reference to the main FrameWorker orchestrator
@@ -49,6 +49,11 @@ class PipelineProcessor:
         self._kernel_sobel_y: torch.Tensor | None = None
 
         self._mouth_action_score: float = 0.0
+
+        # Blend mask produced by the active DFM model for the face currently in
+        # flight.  Written by get_swapped_and_prev_face, consumed (and cleared)
+        # by swap_core.  Per-FrameWorker, so it is not shared across threads.
+        self._dfm_mask_512: torch.Tensor | None = None
 
     @property
     def kernel_lap(self) -> torch.Tensor:
@@ -618,6 +623,7 @@ class PipelineProcessor:
         swapper_model: str,
         dfm_model: Any | None,
         parameters: dict[str, Any],
+        dfm_context: dict[str, Any] | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Runs the swapper model inference and returns the swapped face tensor.
@@ -636,6 +642,10 @@ class PipelineProcessor:
             swapper_model:      Active swapper name.
             dfm_model:          Loaded ``DFMModel`` instance, or ``None`` for non-DFM swappers.
             parameters:         Per-face parameter dict.
+            dfm_context:        Optional dict with ``img`` (full-frame CHW tensor),
+                                ``tform_mat`` (2x3 frame->512 crop matrix), ``kps_5``
+                                and ``kps_68``.  Enables the DFL-accurate DFM path;
+                                without it DFM falls back to the legacy 512-crop resize.
 
         Returns:
             Tuple ``(swap_chw_uint8, prev_face_hwc_float)``.
@@ -955,58 +965,22 @@ class PipelineProcessor:
 
         # --- DeepFaceLive (DFM) Path ---
         elif swapper_model == "DeepFaceLive (DFM)" and dfm_model:
-            # Detect model resolution (Results are cached for performance)
-            if hasattr(dfm_model, "_cached_dfm_res"):
-                dfm_res = dfm_model._cached_dfm_res
-            else:
-                dfm_res = 256  # Safe default
-                queue = deque([dfm_model])
-                visited = set([id(dfm_model)])
-                found_res = None
-                while queue and not found_res:
-                    current = queue.popleft()
-                    if hasattr(current, "get_inputs") and callable(current.get_inputs):
-                        try:
-                            shape = current.get_inputs()[0].shape
-                            for s in shape:
-                                if isinstance(s, int) and s > 32 and s % 16 == 0:
-                                    found_res = s
-                                    break
-                        except Exception:
-                            pass
-                    if not found_res and hasattr(current, "__dict__"):
-                        for k, v in current.__dict__.items():
-                            if id(v) not in visited and not k.startswith("__"):
-                                visited.add(id(v))
-                                queue.append(v)
-                if found_res:
-                    dfm_res = found_res
-                elif hasattr(dfm_model, "_dfm_filename_fallback"):
-                    match = re.search(
-                        r"(128|192|224|256|320|384|448|512)",
-                        dfm_model._dfm_filename_fallback,
-                    )
-                    if match:
-                        dfm_res = int(match.group(1))
-                # Cache it for all future frames
-                dfm_model._cached_dfm_res = dfm_res
+            dfm_res = self._get_dfm_input_res(dfm_model)
 
-            # Prepare input for DFM
-            if dfm_res != 512:
-                dfm_input = v2.functional.resize(
-                    original_face_512.float(),
-                    [dfm_res, dfm_res],
-                    interpolation=v2.InterpolationMode.BILINEAR,
-                    antialias=True,
-                ).to(original_face_512.dtype)
-            else:
-                dfm_input = original_face_512.clone()
+            # Build the DFL-framed crop straight from the source frame when we
+            # have the context to do so.  This both fixes the framing (DFM models
+            # are trained on DFL whole_face crops, not on ArcFace crops) and
+            # removes a resampling stage: the legacy path warped the frame to 512
+            # and then downsampled that to the model resolution.
+            dfm_input, dfm_to_crop_mat = self._prepare_dfm_input(
+                dfm_res, dfm_context, parameters, original_face_512
+            )
 
             # Execute DFM inference with thread-safety lock
             with self.worker.models_processor.dfm_inference_lock:
                 if self.worker.models_processor.device_type == "cuda":
                     torch.cuda.current_stream().synchronize()
-                out_celeb, _, _ = dfm_model.convert(
+                out_celeb, out_celeb_mask, out_face_mask = dfm_model.convert(
                     dfm_input,
                     parameters["DFMAmpMorphSlider"] / 100,
                     rct=parameters["DFMRCTColorToggle"],
@@ -1026,6 +1000,31 @@ class PipelineProcessor:
             else:
                 out_celeb_float = out_celeb.float()
 
+            # The model's own masks mark the region it actually generated.  They
+            # are the masks DeepFaceLive blends with, and keep DFM output from
+            # bleeding over the crop borders.
+            self._dfm_mask_512 = self._build_dfm_mask(
+                out_celeb_mask, out_face_mask, dfm_to_crop_mat, parameters
+            )
+
+            # Bring the generated face from DFM crop space into the canonical
+            # 512 ArcFace space every downstream stage (masks, restorers,
+            # colour transfer, paste-back) operates in.  Whatever falls outside
+            # the DFM crop keeps the original pixels, so no black wedge ever
+            # reaches the restorers or the colour-statistics passes.
+            # The legacy path needs none of this: its crop *is* the 512 crop,
+            # and the caller's t512 already rescales it.
+            if dfm_to_crop_mat is not None:
+                out_celeb_float, dfm_validity = self._dfm_to_crop_space(
+                    out_celeb_float, dfm_to_crop_mat, return_validity=True
+                )
+                if dfm_validity.min() < 1.0:
+                    original_hwc = (original_face_512.float() / 255.0).permute(1, 2, 0)
+                    validity_hwc = dfm_validity.permute(1, 2, 0)
+                    out_celeb_float = torch.lerp(
+                        original_hwc, out_celeb_float, validity_hwc
+                    )
+
             # VRAM Optimization: Direct reference assignment
             input_face_affined = out_celeb_float
             prev_face = out_celeb_float
@@ -1044,6 +1043,228 @@ class PipelineProcessor:
         )
         swap = self.worker.t512(output)
         return swap, prev_face
+
+    # ------------------------------------------------------------------
+    # DeepFaceLive (DFM) helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _get_dfm_input_res(dfm_model: Any) -> int:
+        """Returns the DFM model's native square input resolution.
+
+        Reads it straight off the loaded session; falls back to parsing a
+        resolution out of the filename, then to 256, so a model whose graph
+        declares symbolic spatial dims still runs.
+        """
+        cached = getattr(dfm_model, "_cached_dfm_res", None)
+        if isinstance(cached, int) and cached > 0:
+            return cached
+
+        dfm_res = 0
+        try:
+            width, height = dfm_model.get_input_res()
+            if isinstance(width, int) and isinstance(height, int) and width > 0:
+                dfm_res = int(min(width, height))
+        except Exception:
+            dfm_res = 0
+
+        if dfm_res <= 0:
+            filename = getattr(dfm_model, "_dfm_filename_fallback", "") or ""
+            match = re.search(r"(128|160|192|224|256|288|320|384|448|512)", filename)
+            dfm_res = int(match.group(1)) if match else 256
+            print(
+                f"[WARN] Could not read DFM input resolution from the graph; using {dfm_res}."
+            )
+
+        dfm_model._cached_dfm_res = dfm_res
+        return dfm_res
+
+    def _dfm_alignment_params(
+        self, parameters: dict[str, Any]
+    ) -> tuple[float, float, float, bool] | None:
+        """Resolves the DFM alignment settings, or ``None`` for legacy framing."""
+        mode = parameters.get("DFMAlignmentModeSelection", "DFL (DeepFaceLab)")
+        if mode != "DFL (DeepFaceLab)":
+            return None
+        coverage = float(
+            parameters.get("DFMCoverageDecimalSlider", dfl_align.DEFAULT_COVERAGE)
+        )
+        x_offset = float(parameters.get("DFMOffsetXDecimalSlider", 0.0))
+        y_offset = float(
+            parameters.get("DFMOffsetYDecimalSlider", dfl_align.WHOLE_FACE_Y_OFFSET)
+        )
+        use_68 = bool(parameters.get("DFMUse68LandmarksToggle", True))
+        return coverage, x_offset, y_offset, use_68
+
+    def _prepare_dfm_input(
+        self,
+        dfm_res: int,
+        dfm_context: dict[str, Any] | None,
+        parameters: dict[str, Any],
+        original_face_512: torch.Tensor,
+    ) -> tuple[torch.Tensor, np.ndarray | None]:
+        """Produces the aligned face fed to the DFM model.
+
+        Returns ``(face_chw, dfm_to_crop_mat)``.  ``dfm_to_crop_mat`` is the 2x3
+        affine taking DFM crop coordinates into the 512 ArcFace crop, or ``None``
+        when the legacy path was used (in which case DFM space *is* 512 space,
+        just at a different scale).
+        """
+        align = self._dfm_alignment_params(parameters)
+        if align is not None and dfm_context:
+            coverage, x_offset, y_offset, use_68 = align
+            img = dfm_context.get("img")
+            tform_mat = dfm_context.get("tform_mat")
+            kps_5 = dfm_context.get("kps_5")
+            kps_68 = dfm_context.get("kps_68") if use_68 else None
+            if img is not None and tform_mat is not None and kps_5 is not None:
+                try:
+                    dfm_mat = dfl_align.get_dfl_transform(
+                        dfm_res,
+                        kps_5=kps_5,
+                        landmarks_68=kps_68,
+                        coverage=coverage,
+                        x_offset=x_offset,
+                        y_offset=y_offset,
+                    )
+                    face = self.worker.get_transformed_face(
+                        dfm_mat, img, dfm_res, interp_mode="bicubic"
+                    )
+                    dfm_to_crop = dfl_align.compose_affine(
+                        tform_mat, dfl_align.invert_affine(dfm_mat)
+                    )
+                    return face, dfm_to_crop
+                except Exception as e:
+                    print(
+                        f"[WARN] DFL alignment for DFM failed ({e}); using legacy ArcFace crop."
+                    )
+
+        # Legacy behaviour: resample the already-warped 512 crop.
+        if dfm_res != 512:
+            face = v2.functional.resize(
+                original_face_512.float(),
+                [dfm_res, dfm_res],
+                interpolation=v2.InterpolationMode.BILINEAR,
+                antialias=True,
+            ).to(original_face_512.dtype)
+        else:
+            face = original_face_512.clone()
+        return face, None
+
+    def _dfm_to_crop_space(
+        self,
+        hwc: torch.Tensor,
+        dfm_to_crop_mat: np.ndarray | None,
+        return_validity: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        """Maps an HWC tensor from DFM crop space into the 512 ArcFace crop.
+
+        The DFL crop and the ArcFace crop are framed differently, so the two
+        squares do not coincide: part of the 512 crop can lie outside the DFM
+        crop and receives no data.  With *return_validity* the caller also gets
+        a 1xHxW coverage mask (1 inside the DFM crop, 0 outside) so it can fill
+        the gap instead of leaving black pixels for downstream stages to
+        analyse.
+        """
+        chw = hwc.permute(2, 0, 1).unsqueeze(0)
+        if dfm_to_crop_mat is None:
+            if chw.shape[-1] != 512 or chw.shape[-2] != 512:
+                chw = v2.functional.resize(
+                    chw,
+                    [512, 512],
+                    interpolation=v2.InterpolationMode.BICUBIC,
+                    antialias=True,
+                )
+            out = chw.squeeze(0).permute(1, 2, 0).contiguous()
+            if return_validity:
+                validity = torch.ones(
+                    (1, 512, 512), dtype=torch.float32, device=out.device
+                )
+                return out, validity
+            return out
+
+        mat = (
+            torch.from_numpy(np.ascontiguousarray(dfm_to_crop_mat[0:2]))
+            .float()
+            .unsqueeze(0)
+            .to(chw.device)
+        )
+        source = chw.float()
+        if return_validity:
+            source = torch.cat(
+                [source, torch.ones_like(source[:, :1])], dim=1
+            )  # alpha channel travels through the same warp
+        warped = kgm.warp_affine(
+            source,
+            mat,
+            dsize=(512, 512),
+            mode="bicubic",
+            align_corners=True,
+        ).squeeze(0)
+
+        if return_validity:
+            validity = warped[-1:].clamp(0.0, 1.0)
+            warped = warped[:-1]
+            return warped.permute(1, 2, 0).contiguous(), validity
+        return warped.permute(1, 2, 0).contiguous()
+
+    def _build_dfm_mask(
+        self,
+        out_celeb_mask: torch.Tensor | None,
+        out_face_mask: torch.Tensor | None,
+        dfm_to_crop_mat: np.ndarray | None,
+        parameters: dict[str, Any],
+    ) -> torch.Tensor | None:
+        """Combines the DFM model's own masks into a 1x512x512 blend mask.
+
+        DeepFaceLive multiplies the source-face mask (``out_face_mask``) with the
+        generated-celeb mask (``out_celeb_face_mask``); doing the same here keeps
+        DFM output inside the region the model actually synthesised instead of
+        pasting the full square crop.  Returns ``None`` when disabled.
+        """
+        if not parameters.get("DFMFaceMaskEnableToggle", True):
+            return None
+        if out_celeb_mask is None and out_face_mask is None:
+            return None
+
+        mask = None
+        for part in (out_celeb_mask, out_face_mask):
+            if part is None:
+                continue
+            part_f = part.float()
+            if part_f.max() > 2.0:
+                part_f = part_f / 255.0
+            if part_f.dim() == 2:
+                part_f = part_f.unsqueeze(-1)
+            mask = part_f if mask is None else mask * part_f
+
+        if mask is None:
+            return None
+
+        mask_512 = cast(
+            torch.Tensor,
+            self._dfm_to_crop_space(mask.clamp(0.0, 1.0), dfm_to_crop_mat),
+        )
+        mask = mask_512.permute(2, 0, 1)[:1].contiguous().clamp(0.0, 1.0)
+
+        erode = int(parameters.get("DFMMaskErodeSlider", 0))
+        if erode != 0:
+            kernel = abs(erode) * 2 + 1
+            padding = abs(erode)
+            if erode > 0:
+                mask = -F.max_pool2d(
+                    -mask.unsqueeze(0), kernel_size=kernel, stride=1, padding=padding
+                ).squeeze(0)
+            else:
+                mask = F.max_pool2d(
+                    mask.unsqueeze(0), kernel_size=kernel, stride=1, padding=padding
+                ).squeeze(0)
+
+        blur = int(parameters.get("DFMMaskBlurSlider", 10))
+        if blur > 0:
+            gauss = v2.GaussianBlur(blur * 2 + 1, (blur + 1) * 0.2)
+            mask = gauss(mask)
+
+        return mask.clamp(0.0, 1.0)
 
     def get_border_mask(self, parameters):
         """Creates the border fade mask based on sliders."""
@@ -1484,6 +1705,8 @@ class PipelineProcessor:
         control = control if control is not None else {}
         swapper_model = parameters["SwapModelSelection"]
         itex = 1  # FW-BUG-10: default before any branching to prevent NameError
+        # Cleared per call: only the DFM branch below repopulates it.
+        self._dfm_mask_512 = None
 
         # OPTIMIZED: Lightweight functional resize wrapper to prevent VRAM fragmentation
         # and GC stutters caused by inline v2.Resize class instantiation.
@@ -1624,6 +1847,22 @@ class PipelineProcessor:
                 input_face_affined = input_face_affined.permute(1, 2, 0).contiguous()
                 input_face_affined = torch.div(input_face_affined, 255.0)
 
+                dfm_context = None
+                if swapper_model == "DeepFaceLive (DFM)":
+                    _kps_68 = (
+                        kps
+                        if isinstance(kps, np.ndarray)
+                        and kps.ndim == 2
+                        and kps.shape[0] == 68
+                        else None
+                    )
+                    dfm_context = {
+                        "img": img,
+                        "tform_mat": cast(np.ndarray, tform.params)[0:2],
+                        "kps_5": kps_5,
+                        "kps_68": _kps_68,
+                    }
+
                 swap, prev_face = self.get_swapped_and_prev_face(
                     output,
                     input_face_affined,
@@ -1634,6 +1873,7 @@ class PipelineProcessor:
                     swapper_model,
                     dfm_model_instance,
                     parameters,
+                    dfm_context=dfm_context,
                 )
         else:
             swap = original_face_512
@@ -1703,6 +1943,23 @@ class PipelineProcessor:
             device=self.worker.models_processor.device,
         )
         swap_mask_noFP = border_mask.clone()
+
+        # DFM models emit their own face masks; fold them in before every other
+        # mask so the rest of the chain (occluder, XSeg, parser, border) narrows
+        # the region further rather than fighting a full-square paste.
+        if self._dfm_mask_512 is not None:
+            dfm_mask = self._dfm_mask_512
+            if (
+                dfm_mask.shape[-2] != current_swap_h
+                or dfm_mask.shape[-1] != current_swap_w
+            ):
+                dfm_mask = _resize_func(
+                    dfm_mask, (current_swap_h, current_swap_w), is_mask=True
+                )
+            swap_mask.mul_(dfm_mask)
+            swap_mask_noFP.mul_(dfm_mask)
+            self._dfm_mask_512 = None
+
         # CORE STATS MASKS (Hard edges, inner face isolation only)
         core_stats_mask = torch.ones(
             (1, current_swap_h, current_swap_w),

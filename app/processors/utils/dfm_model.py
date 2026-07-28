@@ -77,16 +77,49 @@ class DFMModel:
         if len(inputs) == 0 or "in_face" not in inputs[0].name:
             raise ValueError(f"Invalid model {model_path}")
 
-        self._input_height, self._input_width = inputs[0].shape[1:3]
+        # Bind against the graph's real tensor names rather than assuming the
+        # ":0" TensorFlow suffix — DFM files exported by different trainers use
+        # "in_face:0", "in_face" or "in_face:0:0".
+        self._input_name = inputs[0].name
+        self._morph_input_name = None
+
+        # DFM graphs are NHWC with a symbolic batch dimension.  Spatial dims are
+        # normally static ints; coerce numeric strings and reject anything that
+        # is still symbolic, because every downstream buffer is sized from these.
+        self._input_height, self._input_width = (
+            self._as_static_dim(dim, model_path) for dim in inputs[0].shape[1:3]
+        )
         self._model_type = 1
 
         if len(inputs) == 2:
             if "morph_value" not in inputs[1].name:
                 raise ValueError(f"Invalid model {model_path}")
+            self._morph_input_name = inputs[1].name
             self._model_type = 2
 
         elif len(inputs) > 2:
             raise ValueError(f"Invalid model {model_path}")
+
+        # Resolve the three outputs by name so a model that emits them in a
+        # different order still produces the correct celeb face / masks.
+        # Positional order is the documented DFM order and stays as the fallback.
+        outputs = sess.get_outputs()
+        if len(outputs) < 3:
+            raise ValueError(
+                f"Invalid model {model_path}: expected 3 outputs, got {len(outputs)}"
+            )
+        self._out_index = {"face_mask": 0, "celeb": 1, "celeb_mask": 2}
+        by_name = {o.name.split(":")[0]: i for i, o in enumerate(outputs)}
+        resolved = {
+            "face_mask": by_name.get("out_face_mask"),
+            "celeb": by_name.get("out_celeb_face"),
+            "celeb_mask": by_name.get("out_celeb_face_mask"),
+        }
+        if (
+            all(v is not None for v in resolved.values())
+            and len(set(resolved.values())) == 3
+        ):
+            self._out_index = resolved  # type: ignore[assignment]
 
         # Mapping function from ONNX Runtime data types to PyTorch dtypes (you may need to adjust based on your actual usage)
         self.onnx_to_torch_dtype = {
@@ -106,6 +139,18 @@ class DFMModel:
             # Add other necessary dtype mappings as needed
         }
 
+    @staticmethod
+    def _as_static_dim(dim, model_path: str) -> int:
+        """Returns *dim* as a positive int, or raises with a useful message."""
+        if isinstance(dim, int) and dim > 0:
+            return dim
+        if isinstance(dim, str) and dim.isdigit() and int(dim) > 0:
+            return int(dim)
+        raise ValueError(
+            f"Invalid model {model_path}: input resolution is dynamic ({dim!r}). "
+            "DFM models must declare a fixed square input size."
+        )
+
     @property
     def binding_device_id(self) -> int:
         return self.gpu_id if self.device_type != "cpu" else 0
@@ -121,12 +166,19 @@ class DFMModel:
 
     def convert(self, img, morph_factor=0.75, rct=False):
         """
-        img    torch.Tensor  CHW uint8,float32
-        morph_factor   float   used if model supports it
-        returns:
-         img        NHW3  same dtype as img
-         celeb_mask NHW1  same dtype as img
-         face_mask  NHW1  same dtype as img
+        Runs the DFM generator on one aligned face.
+
+        Args:
+            img: CHW ``uint8``/``float32`` RGB tensor holding the aligned face.
+                 When it already matches the model's native resolution the
+                 resize below is skipped, avoiding a second resampling pass.
+            morph_factor: AMP morph value; ignored by non-AMP models.
+            rct: Apply Reinhard colour transfer towards the input face.
+
+        Returns:
+            ``(out_celeb, out_celeb_mask, out_face_mask)`` — HWC tensors in the
+            same dtype as *img*.  ``out_celeb`` is RGB, both masks are single
+            channel.
         """
         dtype = img.dtype
 
@@ -134,13 +186,16 @@ class DFMModel:
         img = self.to_ufloat32(img)
         img = torch.unsqueeze(img, 0)  # Add batch dimension
 
-        # Resize to the input shape
-        img = torch.nn.functional.interpolate(
-            img,
-            size=(self._input_height, self._input_width),
-            mode="bilinear",
-            align_corners=False,
-        )
+        # Resize to the input shape (no-op when the caller already warped the
+        # face at the model's native resolution)
+        if img.shape[2] != self._input_height or img.shape[3] != self._input_width:
+            img = torch.nn.functional.interpolate(
+                img,
+                size=(self._input_height, self._input_width),
+                mode="bilinear",
+                align_corners=False,
+                antialias=True,
+            )
 
         # Convert from RGB to BGR Format (assuming input is RGB)
         img = img[:, [2, 1, 0], :, :]  # Reverse the channel dimension (C)
@@ -154,7 +209,7 @@ class DFMModel:
 
         # Bind input image tensor
         io_binding.bind_input(
-            name="in_face:0",
+            name=self._input_name,
             device_type=self.device_type,
             device_id=self.binding_device_id,
             element_type=np.float32,
@@ -168,7 +223,7 @@ class DFMModel:
                 [morph_factor], dtype=torch.float32, device=self.device
             )
             io_binding.bind_input(
-                name="morph_value:0",
+                name=self._morph_input_name,
                 device_type=self.device_type,
                 device_id=self.binding_device_id,
                 element_type=np.float32,
@@ -213,7 +268,10 @@ class DFMModel:
 
         # Process outputs (resize, clip channels, and convert back to original dtype)
         out_face_mask = self.to_dtype(
-            self.ch(self.resize(binding_outputs[0], (W, H)), 1), dtype
+            self.ch(
+                self.resize(binding_outputs[self._out_index["face_mask"]], (W, H)), 1
+            ),
+            dtype,
         )
 
         # NHWC to HWC
@@ -221,12 +279,16 @@ class DFMModel:
 
         # Process outputs (resize, clip channels, and convert back to original dtype)
         out_celeb = self.to_dtype(
-            self.ch(self.resize(binding_outputs[1], (W, H)), 3), dtype
+            self.ch(self.resize(binding_outputs[self._out_index["celeb"]], (W, H)), 3),
+            dtype,
         )
 
         # Process outputs (resize, clip channels, and convert back to original dtype)
         out_celeb_mask = self.to_dtype(
-            self.ch(self.resize(binding_outputs[2], (W, H)), 1), dtype
+            self.ch(
+                self.resize(binding_outputs[self._out_index["celeb_mask"]], (W, H)), 1
+            ),
+            dtype,
         )
 
         # If rct is enabled, further processing is needed
@@ -374,13 +436,28 @@ class DFMModel:
         return img_out
 
     def convert_shape(self, shape):
-        # Iterate over each dimension in the shape
-        return tuple(
-            int(dim)
-            if isinstance(dim, int) or (isinstance(dim, str) and dim.isdigit())
-            else 1
-            for dim in shape
-        )
+        """Resolves an ONNX output shape to concrete dimensions.
+
+        DFM graphs declare their batch (and occasionally spatial) dimensions as
+        symbolic names such as ``unk__154``.  Batch is always 1 here; unresolved
+        spatial dimensions fall back to the model's native input resolution
+        rather than to 1, which would otherwise allocate a 1x1 output buffer.
+        """
+        dims = []
+        for axis, dim in enumerate(shape):
+            if isinstance(dim, int):
+                dims.append(int(dim))
+            elif isinstance(dim, str) and dim.isdigit():
+                dims.append(int(dim))
+            elif axis == 0:
+                dims.append(1)
+            elif axis == 1:
+                dims.append(int(self._input_height))
+            elif axis == 2:
+                dims.append(int(self._input_width))
+            else:
+                dims.append(1)
+        return tuple(dims)
 
     def to_dtype(self, img, dtype, from_tanh=False):
         if dtype == torch.float32:
