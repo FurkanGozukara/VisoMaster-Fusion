@@ -25,6 +25,19 @@ Please also star, watch, and fork the [Stable Diffusion & Generative AI reposito
   - If you do not want to follow the [requirements tutorial](https://youtu.be/DrhUHnYfwC0), run `Windows_Start_Portable.bat` immediately.
   - `Windows_Start_Portable.bat` installs the portable Python runtime and every dependency inside a virtual environment.
 
+
+## 28 July 2026 Update
+
+- Our fork merged with the updates of mainstream repo and all newest changes that main repo is also now in our app with our additional amazing features
+- DeepFace Lab DFM models support fully added and working amazing (this was requested by one member)
+  - Put DeepFace Lab DFM models inside \VisoMaster-Fusion\model_assets\dfm_models folder and it will let you pick from the interface
+  - DFM models are idendity locked so you don't get to choose source image, they replace face to trained face with higher better quality than any other swappers
+  - Play with DFM parameters to get best output
+  - Example image how to use below
+- For updating, get latest zip file, extract and just run Windows_Install.bat to update the app
+
+<img width="3821" height="1971" alt="dfm" src="https://github.com/user-attachments/assets/887f2f70-478f-43f4-a20a-77bcd3b27b57" loading="lazy" />
+
 ## 14 July 2026 Massive Update
 
 - Deleting the existing `venv` folder is mandatory for this major upgrade; alternatively, make a fresh installation.
