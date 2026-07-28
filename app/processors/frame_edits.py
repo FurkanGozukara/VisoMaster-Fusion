@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 import numpy as np
@@ -9,6 +9,7 @@ from app.processors.utils import faceutil
 
 if TYPE_CHECKING:
     from app.processors.models_processor import ModelsProcessor
+    from app.processors.workers.function_worker import FunctionWorker
 
 
 class FrameEdits:
@@ -23,14 +24,21 @@ class FrameEdits:
     - Image Warping and Pasting
     """
 
-    def __init__(self, models_processor: "ModelsProcessor"):
+    def __init__(
+        self,
+        models_processor: "ModelsProcessor",
+        function_worker: "FunctionWorker",
+    ):
         """
         Initializes the FrameEdits class.
 
         Args:
             models_processor: Reference to the central model manager (provides models & device).
+            function_worker: The central FunctionWorker instance. Passed to sub-processors
+                              so they can route calls through this Facade.
         """
         self.models_processor = models_processor
+        self.function_worker = function_worker
 
         # Transforms will be updated per frame/settings via set_transforms
         self.t256_face: v2.Resize = v2.Resize(
@@ -39,11 +47,8 @@ class FrameEdits:
         )
         self.interpolation_expression_faceeditor_back = None
 
-        # Per-face EMA state for the optional Recast expression smoothing
-        # (``RecastExpressionSmoothToggle``). Keyed by a quantized face centroid
-        # so multiple faces in a frame are smoothed independently. Stateless
-        # frame processing otherwise has no driving-frame history.
-        self._recast_exp_state: dict = {}
+        # Persistent VRAM cache for Recast feather masks to avoid per-frame allocation
+        self._recast_feather_masks: dict = {}
 
     def set_transforms(self, t256_face, interpolation_expression_faceeditor_back):
         """
@@ -66,7 +71,7 @@ class FrameEdits:
         )
 
     def _apply_kornia_warp(
-        self, out: torch.Tensor, M_c2o: np.ndarray, dsize: tuple
+        self, out: torch.Tensor, M_c2o: np.ndarray, dsize: tuple[int, int]
     ) -> torch.Tensor:
         """
         Internal helper to warp and paste the processed face back into the original frame using Kornia.
@@ -86,7 +91,6 @@ class FrameEdits:
         # for the RAM-to-VRAM transfer to complete via the PCIe bus.
         M_c2o_tensor = (
             torch.from_numpy(M_c2o)
-            .pin_memory()
             .float()
             .unsqueeze(0)
             .to(out.device, non_blocking=True)
@@ -110,7 +114,7 @@ class FrameEdits:
         target: torch.Tensor,
         parameters: dict,
         control: dict,
-        driving_kps: np.ndarray = None,
+        driving_kps: np.ndarray | None = None,
     ) -> torch.Tensor:
         """
         Restores the expression of the face using the LivePortrait model pipeline.
@@ -160,7 +164,7 @@ class FrameEdits:
             if driving_kps is not None and not np.all(driving_kps == 0):
                 driving_lmk_crop = driving_kps
             else:
-                _, driving_lmk_crop, _ = self.models_processor.run_detect_landmark(
+                _, driving_lmk_crop, _ = self.function_worker.run_detect_landmark(
                     driving,
                     bbox=np.array([0, 0, 512, 512]),
                     det_kpss=[],
@@ -204,7 +208,7 @@ class FrameEdits:
             c_d_lip_lst = faceutil.calc_lip_close_ratio(driving_lmk_crop[None])
 
             # Extract Motion from Driving Face
-            x_d_i_info = self.models_processor.lp_motion_extractor(
+            x_d_i_info = self.function_worker.lp_motion_extractor(
                 driving_face_256, "Human-Face"
             )
 
@@ -212,7 +216,7 @@ class FrameEdits:
             target = target.clamp(0, 255).type(torch.uint8)
 
             # Always run detection on the target face to get the landmarks for warping
-            _, source_lmk, _ = self.models_processor.run_detect_landmark(
+            _, source_lmk, _ = self.function_worker.run_detect_landmark(
                 target,
                 bbox=np.array([0, 0, 512, 512], dtype=np.float32),
                 det_kpss=None,
@@ -238,7 +242,7 @@ class FrameEdits:
                 interpolation=interp_mode,
             )
             target_face_256 = self.t256_face(target_face_512)
-            x_s_info = self.models_processor.lp_motion_extractor(
+            x_s_info = self.function_worker.lp_motion_extractor(
                 target_face_256, "Human-Face"
             )
 
@@ -247,7 +251,7 @@ class FrameEdits:
             R_s = faceutil.get_rotation_matrix(
                 x_s_info["pitch"], x_s_info["yaw"], x_s_info["roll"]
             )
-            f_s = self.models_processor.lp_appearance_feature_extractor(
+            f_s = self.function_worker.lp_appearance_feature_extractor(
                 target_face_256, "Human-Face"
             )
             x_s = faceutil.transform_keypoint(x_s_info)
@@ -255,7 +259,7 @@ class FrameEdits:
             face_editor_type = parameters.get("FaceEditorTypeSelection", "Human-Face")
 
             # --- ZERO-TRANSLATION PRE-CALCULATION ---
-            default_delta_raw = self.models_processor.lp_stitch(
+            default_delta_raw = self.function_worker.lp_stitch(
                 x_s, x_s, face_editor_type
             )
             default_delta_exp = default_delta_raw[..., :-2].reshape(x_s.shape[0], 21, 3)
@@ -294,7 +298,7 @@ class FrameEdits:
             # Only send to GPU once by checking if it's already a tensor in the central processor.
             if not hasattr(self, "_cached_lp_lip_tensor"):
                 self._cached_lp_lip_tensor = torch.from_numpy(
-                    self.models_processor.lp_lip_array
+                    self.function_worker.face_editors.lp_lip_array
                 ).to(dtype=torch.float32, device=self.models_processor.device)
             lp_lip_array = self._cached_lp_lip_tensor
 
@@ -497,7 +501,7 @@ class FrameEdits:
 
                 # 3. PROJECTION & REFINEMENT
                 x_proj = scale_anchor * (x_c_s @ R_anchor + delta_local) + t_anchor
-                raw_delta = self.models_processor.lp_stitch(
+                raw_delta = self.function_worker.lp_stitch(
                     x_s, x_proj, face_editor_type
                 )
                 refinement_exp = raw_delta[..., :-2].reshape(x_s.shape[0], 21, 3)
@@ -601,7 +605,7 @@ class FrameEdits:
                         c_d_lip_lst, source_lmk, device=self.models_processor.device
                     )
                     if combined_lip_ratio[0][0] >= lip_normalize_threshold:
-                        lips_retarget_delta = self.models_processor.lp_retarget_lip(
+                        lips_retarget_delta = self.function_worker.lp_retarget_lip(
                             x_s, combined_lip_ratio
                         )
 
@@ -729,10 +733,10 @@ class FrameEdits:
                         )
 
                         # 2. Double MLP Inference
-                        delta_left_sym = self.models_processor.lp_retarget_eye(
+                        delta_left_sym = self.function_worker.lp_retarget_eye(
                             x_s, ratio_left * eye_mult, face_editor_type
                         )
-                        delta_right_sym = self.models_processor.lp_retarget_eye(
+                        delta_right_sym = self.function_worker.lp_retarget_eye(
                             x_s, ratio_right * eye_mult, face_editor_type
                         )
 
@@ -801,7 +805,7 @@ class FrameEdits:
                         c_d_lip = faceutil.calc_combined_lip_ratio(
                             c_d_lip_lst, source_lmk, device=self.models_processor.device
                         )
-                        lips_retarget_delta = self.models_processor.lp_retarget_lip(
+                        lips_retarget_delta = self.function_worker.lp_retarget_lip(
                             x_s, c_d_lip * lip_mult, face_editor_type
                         )
 
@@ -887,74 +891,31 @@ class FrameEdits:
             # --- GENERATE FINAL IMAGE ---
             x_d_i_new = x_s + accumulated_motion
 
-            out = self.models_processor.lp_warp_decode(
+            out = self.function_worker.lp_warp_decode(
                 f_s, x_s, x_d_i_new, face_editor_type
             )
             out = torch.squeeze(out).clamp_(0, 1)
 
             # --- PASTE BACK ---
             dsize = (target.shape[1], target.shape[2])
+
+            # 1. Create a tracking mask, shaving 2 pixels off the outer edge to
+            # prevent Kornia's bilinear boundary interpolation from creating a seam.
+            warp_mask = torch.zeros(
+                (1, out.shape[1], out.shape[2]), dtype=out.dtype, device=out.device
+            )
+            warp_mask[:, 2:-2, 2:-2] = 1.0
+            warp_mask = self._apply_kornia_warp(warp_mask, M_c2o, dsize)
+
+            # 2. Warp the edited face back to the target's coordinate space
             out = self._apply_kornia_warp(out, M_c2o, dsize)
             out = out.mul_(255.0).clamp_(0, 255)
 
+            # 3. Composite over the original target to preserve the outer background pixels!
+            target_float = target.type(torch.float32)
+            out = out * warp_mask + target_float * (1.0 - warp_mask)
+
         return out.type(torch.float32)
-
-    def _recast_smooth_exp(
-        self, exp_d: torch.Tensor, source_lmk, strength: float
-    ) -> torch.Tensor:
-        """Temporally smooth the driving expression with a per-face EMA.
-
-        VisoMaster processes frames independently (no driving-frame history),
-        so the upstream Kalman ``flag_smooth`` is approximated here with a
-        simple exponential moving average kept on the FrameEdits instance.
-        State is matched to the *nearest previous face centroid* within a
-        tolerance (not an exact grid bucket), so a moving face keeps tracking
-        its own EMA frame-to-frame instead of losing it whenever it drifts
-        across a grid boundary (which made smoothing a no-op before).
-        ``strength`` in [0,1] is the weight given to the previous estimate
-        (0 = no smoothing, higher = smoother/more lag).
-        """
-        strength = max(0.0, min(1.0, float(strength)))
-        if strength <= 0.0:
-            return exp_d
-
-        try:
-            centroid = np.asarray(source_lmk, dtype=np.float32).reshape(-1, 2).mean(0)
-            cx, cy = float(centroid[0]), float(centroid[1])
-        except Exception:
-            cx, cy = 0.0, 0.0
-
-        # Find the closest tracked face within tolerance (face size ~ hundreds
-        # of px, so 120px comfortably covers normal frame-to-frame motion).
-        tol = 120.0
-        best_key = None
-        best_dist = tol
-        for k, (pcx, pcy, _exp) in self._recast_exp_state.items():
-            dist = ((pcx - cx) ** 2 + (pcy - cy) ** 2) ** 0.5
-            if dist <= best_dist:
-                best_dist = dist
-                best_key = k
-
-        if best_key is not None:
-            _pcx, _pcy, prev = self._recast_exp_state[best_key]
-            if prev.shape == exp_d.shape:
-                smoothed = prev.to(exp_d.device) * strength + exp_d * (1.0 - strength)
-            else:
-                smoothed = exp_d
-            key = best_key
-        else:
-            smoothed = exp_d
-            # New face slot keyed by an incrementing id.
-            key = max(self._recast_exp_state.keys(), default=-1) + 1
-
-        self._recast_exp_state[key] = (cx, cy, smoothed.detach().clone())
-
-        # Bound the state dict so long multi-face sessions can't grow unbounded.
-        if len(self._recast_exp_state) > 16:
-            self._recast_exp_state.clear()
-            self._recast_exp_state[0] = (cx, cy, smoothed.detach().clone())
-
-        return smoothed
 
     def apply_perform_recast(
         self,
@@ -962,7 +923,7 @@ class FrameEdits:
         target: torch.Tensor,
         parameters: dict,
         control: dict,
-        driving_kps: np.ndarray = None,
+        driving_kps: np.ndarray | None = None,
     ) -> torch.Tensor:
         """Transfer expression onto the swapped face using PerformRecast.
 
@@ -984,8 +945,6 @@ class FrameEdits:
         """
         import contextlib
 
-        recast = self.models_processor.perform_recast
-
         # Use the current stream (see apply_face_expression_restorer for why a
         # per-frame cuda.Stream() fragments the allocator).
         local_stream = (
@@ -1000,7 +959,7 @@ class FrameEdits:
         # Eagerly load (and build TensorRT engines for) all four sub-networks so
         # the build dialog is shown for every PerformRecast model, not just the
         # ones that happen to need a lazy first-run build.
-        recast.prewarm()
+        self.function_worker.perform_recast_prewarm()
 
         with stream_context, torch.inference_mode():
             use_mean_eyes = parameters.get("LandmarkMeanEyesToggle", False)
@@ -1011,32 +970,32 @@ class FrameEdits:
             factor = float(parameters.get("RecastExpressionFactorDecimalSlider", 1.0))
             region = parameters.get("RecastAnimationRegionSelection", "all")
             eye_weight = float(
-                parameters.get("RecastEyeDrivingWeightDecimalSlider", 0.7)
+                parameters.get("RecastEyeDrivingWeightDecimalSlider", 1.0)
             )
             lip_weight = float(
-                parameters.get("RecastLipDrivingWeightDecimalSlider", 0.8)
+                parameters.get("RecastLipDrivingWeightDecimalSlider", 1.0)
             )
-            smooth_on = parameters.get("RecastExpressionSmoothToggle", False)
-            smooth_strength = float(
-                parameters.get("RecastSmoothStrengthDecimalSlider", 0.5)
+            brows_weight = float(
+                parameters.get("RecastBrowsDrivingWeightDecimalSlider", 1.0)
+            )
+            cheeks_weight = float(
+                parameters.get("RecastCheeksDrivingWeightDecimalSlider", 0.20)
+            )
+            jaw_weight = float(
+                parameters.get("RecastJawDrivingWeightDecimalSlider", 0.15)
             )
             feather_amount = float(
                 parameters.get("RecastPasteBackFeatherDecimalSlider", 0.0)
             )
-
-            # Dedicated Recast crop scale, independent of the shared expression
-            # crop used by the Simple/Advanced (LivePortrait) modes. Tighter
-            # crops give better identity detail but, if too tight for a pose,
-            # drive the generator out of distribution into black frames (caught
-            # by the degenerate-output guard below; fp16 widens that range).
-            # Default matches the proven 2.3 framing; raise for VR180.
-            crop_scale = parameters.get("RecastCropScaleDecimalSlider", None)
-            if crop_scale is None:
-                crop_scale = parameters.get(
-                    "FaceExpressionCropScaleBothDecimalSlider", 2.3
-                )
-            crop_scale = float(crop_scale)
-            vy_ratio = parameters.get("FaceExpressionVYRatioBothDecimalSlider", -0.125)
+            structural_blend = float(
+                parameters.get("RecastRelativeStructuralBlendDecimalSlider", 0.50)
+            )
+            crop_scale = float(
+                parameters.get("FaceExpressionCropScaleBothDecimalSlider", 1.5)
+            )
+            vy_ratio = float(
+                parameters.get("FaceExpressionVYRatioBothDecimalSlider", -0.125)
+            )
             interp_mode = (
                 self.interpolation_expression_faceeditor_back
                 if self.interpolation_expression_faceeditor_back is not None
@@ -1053,7 +1012,7 @@ class FrameEdits:
             if driving_kps is not None and not np.all(driving_kps == 0):
                 driving_lmk_crop = driving_kps
             else:
-                _, driving_lmk_crop, _ = self.models_processor.run_detect_landmark(
+                _, driving_lmk_crop, _ = self.function_worker.run_detect_landmark(
                     driving,
                     bbox=np.array([0, 0, d_w, d_h], dtype=np.float32),
                     det_kpss=[],
@@ -1081,13 +1040,14 @@ class FrameEdits:
                 padding_mode="border",
             )
             driving_face_256 = self.t256_face(driving_face_512)
-            x_d_info = recast.motion(driving_face_256)
+
+            x_d_info = self.function_worker.perform_recast_motion(driving_face_256)
             exp_d = x_d_info["exp"]
 
             # --- TARGET FACE (identity / pose to preserve) ---
             target = target.clamp(0, 255).type(torch.uint8)
             t_h, t_w = int(target.shape[-2]), int(target.shape[-1])
-            _, source_lmk, _ = self.models_processor.run_detect_landmark(
+            _, source_lmk, _ = self.function_worker.run_detect_landmark(
                 target,
                 bbox=np.array([0, 0, t_w, t_h], dtype=np.float32),
                 det_kpss=None,
@@ -1108,21 +1068,21 @@ class FrameEdits:
                 scale=crop_scale,
                 vy_ratio=vy_ratio,
                 interpolation=interp_mode,
-                padding_mode="border",
+                padding_mode="zeros",
             )
             target_face_256 = self.t256_face(target_face_512)
 
             # Source motion + appearance. Appearance (F) takes the 512 crop.
-            x_s_info = recast.motion(target_face_256)
-            source_info = recast.build_source_info(x_s_info)
-            f_s = recast.extract_appearance(target_face_512)
-
-            # Optional temporal smoothing of the driving expression.
-            if smooth_on:
-                exp_d = self._recast_smooth_exp(exp_d, source_lmk, smooth_strength)
+            x_s_info = self.function_worker.perform_recast_motion(target_face_256)
+            source_info = self.function_worker.perform_recast_build_source_info(
+                x_s_info
+            )
+            f_s = self.function_worker.perform_recast_extract_appearance(
+                target_face_512
+            )
 
             # --- COMPOSE + GENERATE ---
-            x_d_i = recast.compose_driven_keypoints(
+            x_d_i = self.function_worker.perform_recast_compose_driven_keypoints(
                 source_info,
                 exp_d,
                 mode=mode,
@@ -1130,8 +1090,14 @@ class FrameEdits:
                 region=region,
                 eye_driving_weight=eye_weight,
                 lip_driving_weight=lip_weight,
+                brows_driving_weight=brows_weight,
+                cheeks_driving_weight=cheeks_weight,
+                jaw_driving_weight=jaw_weight,
+                structural_blend=structural_blend,
             )
-            out = recast.warp_decode(f_s, source_info["x_s"], x_d_i)
+            out = self.function_worker.perform_recast_warp_decode(
+                f_s, source_info["x_s"], x_d_i
+            )
             out = torch.squeeze(out)
 
             # --- DEGENERATE-OUTPUT GUARD ---
@@ -1151,21 +1117,51 @@ class FrameEdits:
             # so this only affects the edge transition, never identity.
             if feather_amount > 0.0:
                 fade = max(1, int(round(feather_amount * 256)))
-                paste_mask = faceutil.create_faded_inner_mask(
-                    (out.shape[1], out.shape[2]),
-                    border_thickness=0,
-                    fade_thickness=fade,
-                    blur_radius=3,
-                    device=out.device,
-                ).unsqueeze(0)
-                tgt01 = (target_face_512.to(out.dtype) / 255.0).clamp_(0, 1)
-                out = out * paste_mask + tgt01 * (1.0 - paste_mask)
 
+                # 1. Fetch or Create Cached Mask
+                if fade not in self._recast_feather_masks:
+                    # The SPADE generator output is always strictly 512x512
+                    self._recast_feather_masks[fade] = faceutil.create_faded_inner_mask(
+                        (512, 512),
+                        border_thickness=0,
+                        fade_thickness=fade,
+                        blur_radius=3,
+                        device=out.device,
+                    ).unsqueeze(0)
+
+                paste_mask = self._recast_feather_masks[fade]
+                tgt01 = (target_face_512.to(out.dtype) / 255.0).clamp_(0, 1)
+
+                # 2. Fused Hardware Lerp (Eliminates intermediate temporary tensors)
+                out = torch.lerp(tgt01, out, paste_mask)
+
+            # --- PASTE BACK ---
             dsize = (target.shape[1], target.shape[2])
+
+            # 1. OPTIMIZED: Cache the base 512x512 tracking mask.
+            # Avoids running torch.zeros() and slicing every single frame.
+            if getattr(self, "_recast_base_warp_mask", None) is None:
+                base_mask = torch.zeros(
+                    (1, 512, 512), dtype=torch.float32, device=out.device
+                )
+                base_mask[:, 2:-2, 2:-2] = 1.0
+                self._recast_base_warp_mask = base_mask
+
+            warp_mask = self._apply_kornia_warp(
+                self._recast_base_warp_mask, M_c2o, dsize
+            )
+
+            # 2. Warp the edited face back to the target's coordinate space
             out = self._apply_kornia_warp(out, M_c2o, dsize)
             out = out.mul_(255.0).clamp_(0, 255)
 
-        return out.type(torch.float32)
+            # 3. OPTIMIZED: Hardware-Fused Lerp Compositing
+            # Eliminates 3 full-frame tensor allocations (no `1.0 - mask`, no multiple math tensors).
+            # This directly frees up the CUDA memory bus for the worker threads.
+            target_float = target.to(dtype=torch.float32, non_blocking=True)
+            out = torch.lerp(target_float, out, warp_mask)
+
+        return out
 
     def swap_edit_face_core(
         self,
@@ -1213,7 +1209,7 @@ class FrameEdits:
                 init_source_lip_ratio = 0.0
 
                 # Detection
-                _, lmk_crop, _ = self.models_processor.run_detect_landmark(
+                _, lmk_crop, _ = self.function_worker.run_detect_landmark(
                     swap_restorecalc,
                     bbox=np.array([0, 0, 512, 512]),
                     det_kpss=[],
@@ -1240,7 +1236,7 @@ class FrameEdits:
                 original_face_256 = self.t256_face(original_face_512)
 
                 # Extract features
-                x_s_info = self.models_processor.lp_motion_extractor(
+                x_s_info = self.function_worker.lp_motion_extractor(
                     original_face_256, parameters["FaceEditorTypeSelection"]
                 )
 
@@ -1273,7 +1269,7 @@ class FrameEdits:
                 # This completely eliminates Euler addition distortion (Gimbal Lock) on extreme angles.
                 R_d_new = R_sliders @ R_s_original
 
-                f_s_user = self.models_processor.lp_appearance_feature_extractor(
+                f_s_user = self.function_worker.lp_appearance_feature_extractor(
                     original_face_256, parameters["FaceEditorTypeSelection"]
                 )
                 x_s_user = faceutil.transform_keypoint(x_s_info)
@@ -1373,7 +1369,7 @@ class FrameEdits:
                         lmk_crop,
                         device=self.models_processor.device,
                     )
-                    eyes_delta = self.models_processor.lp_retarget_eye(
+                    eyes_delta = self.function_worker.lp_retarget_eye(
                         x_s_user,
                         combined_eye_ratio_tensor,
                         parameters["FaceEditorTypeSelection"],
@@ -1393,7 +1389,7 @@ class FrameEdits:
                         lmk_crop,
                         device=self.models_processor.device,
                     )
-                    lip_delta = self.models_processor.lp_retarget_lip(
+                    lip_delta = self.function_worker.lp_retarget_lip(
                         x_s_user,
                         combined_lip_ratio_tensor,
                         parameters["FaceEditorTypeSelection"],
@@ -1411,12 +1407,12 @@ class FrameEdits:
                     "flag_stitching_retargeting_input", True
                 )
                 if flag_stitching_retargeting_input:
-                    x_d_new = self.models_processor.lp_stitching(
+                    x_d_new = self.function_worker.lp_stitching(
                         x_s_user, x_d_new, parameters["FaceEditorTypeSelection"]
                     )
 
                 # Generate Image
-                out = self.models_processor.lp_warp_decode(
+                out = self.function_worker.lp_warp_decode(
                     f_s_user, x_s_user, x_d_new, parameters["FaceEditorTypeSelection"]
                 )
                 out = torch.squeeze(out)
@@ -1424,20 +1420,32 @@ class FrameEdits:
 
                 # --- POST-PROCESSING (Paste Back) ---
                 dsize = (img.shape[1], img.shape[2])
-                out = self._apply_kornia_warp(out, M_c2o, dsize)
 
-                img = out
-                img = img.mul_(255.0).clamp_(0, 255).type(torch.float32)
+                # 1. Create a tracking mask, shaving 2 pixels off the outer edge to
+                # prevent Kornia's bilinear boundary interpolation from creating a seam.
+                warp_mask = torch.zeros(
+                    (1, out.shape[1], out.shape[2]), dtype=out.dtype, device=out.device
+                )
+                warp_mask[:, 2:-2, 2:-2] = 1.0
+                warp_mask = self._apply_kornia_warp(warp_mask, M_c2o, dsize)
+
+                # 2. Warp the manipulated face back to the original frame dimensions
+                out = self._apply_kornia_warp(out, M_c2o, dsize)
+                out = out.mul_(255.0).clamp_(0, 255)
+
+                # 3. Composite over the original img to preserve the background
+                img_float = img.type(torch.float32)
+                img = out * warp_mask + img_float * (1.0 - warp_mask)
 
         return img
 
     def swap_edit_face_core_makeup(
         self,
         img: torch.Tensor,
-        kps: np.ndarray,
+        kps: np.ndarray | None,
         parameters: dict,
         control: dict,
-        **kwargs,
+        **kwargs: Any,
     ) -> torch.Tensor:
         """
         Applies digital makeup to the face using face parser masks.
@@ -1480,7 +1488,7 @@ class FrameEdits:
             )
 
             # 1. The call generates both the makeup image AND the exact mask from FaceParser
-            out, mask_out = self.models_processor.apply_face_makeup(
+            out, mask_out = self.function_worker.apply_face_makeup(
                 original_face_512, parameters
             )
 

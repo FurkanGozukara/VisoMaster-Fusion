@@ -121,7 +121,7 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
             "help": 'Sharpens the original face befor swapping. can sometimes be usefull. care it can tamper with "Auto Face Restorer"!',
         },
     },
-    "Swap strenght and likeness": {
+    "Swap strength and likeness": {
         "StrengthEnableToggle": {
             "level": 1,
             "label": "Strength",
@@ -490,6 +490,18 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
             "parentToggle": "MouthParserStretchToggle & MouthParserStretchOriginalToggle",
             "requiredToggleValue": True,
             "help": "Adjusts the depth of the mouth cavity shadow. Higher values create deeper shadows while preserving natural red/pink flesh tones. 1.0 means no darkening.",
+        },
+        "MouthOriginalCavityBlendingDecimalSlider": {
+            "level": 3,
+            "label": "Original Cavity Blending",
+            "min_value": "0.00",
+            "max_value": "1.00",
+            "default": "0.00",
+            "decimals": 2,
+            "step": 0.05,
+            "parentToggle": "MouthParserStretchToggle & MouthParserStretchOriginalToggle",
+            "requiredToggleValue": True,
+            "help": "Controls the alpha blending between the artificial cavity shadow and the original aligned mouth. 0.0 applies pure artificial darkness, while 1.0 fully restores the original inner mouth textures and teeth.",
         },
         "RestoreTongueToggle": {
             "level": 3,
@@ -1300,16 +1312,23 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
             "level": 2,
             "label": "Transfer Type",
             "options": [
-                "Test",
-                "Test_Mask",
-                "DFL_Test",
-                "DFL_Orig",
-                "AdaIN_Statistical",
+                "CDF Histogram",
+                "CDF Histogram (Masked)",
+                "Reinhard Transfer",
+                "Reinhard Transfer (Masked)",
+                "AdaIN (Core Masked)",
             ],
-            "default": "Test",
+            "default": "CDF Histogram",
             "parentToggle": "AutoColorEnableToggle",
             "requiredToggleValue": True,
-            "help": "Select the AutoColor transfer method type. Hans Method could have some artefacts sometimes.",
+            "help": (
+                "Select the AutoColor transfer method type :\n"
+                "Test → CDF Histogram = Exact Cumulative Distribution Function matching in RGB space.\n"
+                "Test_Mask → CDF Histogram (Masked) = Exact CDF matching, bounded by the face mask.\n"
+                "DFL_Test → Reinhard Transfer = Mean/Variance statistical transfer in LAB color space.\n"
+                "DFL_Orig → Reinhard Transfer (Masked) = Mean/Variance transfer in LAB space, ignoring padding.\n"
+                "AdaIN_Statistical → AdaIN (Core Masked) = Adaptive Instance Normalization with soft-mask erosion."
+            ),
         },
         "AutoColorBlendAmountSlider": {
             "level": 2,
@@ -1337,16 +1356,23 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
             "level": 2,
             "label": "Ending Transfer Type",
             "options": [
-                "Test",
-                "Test_Mask",
-                "DFL_Test",
-                "DFL_Orig",
-                "AdaIN_Statistical",
+                "CDF Histogram",
+                "CDF Histogram (Masked)",
+                "Reinhard Transfer",
+                "Reinhard Transfer (Masked)",
+                "AdaIN (Core Masked)",
             ],
-            "default": "Test",
+            "default": "CDF Histogram",
             "parentToggle": "EndingColorTransferEnableToggle",
             "requiredToggleValue": True,
-            "help": "Select the color transfer algorithm for the final pass.",
+            "help": (
+                "Select the Ending AutoColor transfer method type :\n"
+                "Test →	CDF Histogram = Exact Cumulative Distribution Function matching in RGB space.\n"
+                "Test_Mask → CDF Histogram (Masked) = Exact CDF matching, bounded by the face mask.\n"
+                "DFL_Test → Reinhard Transfer = Mean/Variance statistical transfer in LAB color space.\n"
+                "DFL_Orig →	Reinhard Transfer (Masked) = Mean/Variance transfer in LAB space, ignoring padding.\n"
+                "AdaIN_Statistical → AdaIN (Core Masked) = Adaptive Instance Normalization with soft-mask erosion."
+            ),
         },
         "EndingColorBlendAmountSlider": {
             "level": 2,
@@ -1719,9 +1745,9 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
     "Blend Adjustments": {
         "FinalBlendAdjEnableToggle": {
             "level": 1,
-            "label": "Final Blend",
+            "label": "Final Blend (Whole Face)",
             "default": False,
-            "help": "Blend at the end of pipeline.",
+            "help": "Apply a blur to the entire swapped face at the end of the pipeline.",
         },
         "FinalBlendAmountSlider": {
             "level": 2,
@@ -1732,7 +1758,24 @@ SWAPPER_LAYOUT_DATA: Any = {  # noqa: F811
             "step": 1,
             "parentToggle": "FinalBlendAdjEnableToggle",
             "requiredToggleValue": True,
-            "help": "Adjust the final blend value.",
+            "help": "Adjust the overall final blur value applied to the entire face.",
+        },
+        "FinalBorderBlendEnableToggle": {
+            "level": 1,
+            "label": "Border Seam Blend",
+            "default": False,
+            "help": "Apply a localized blur strictly to the outer mask border to hide seams and hard cutoffs.",
+        },
+        "FinalBorderBlendAmountSlider": {
+            "level": 2,
+            "label": "Border Seam Blend Amount",
+            "min_value": "1",
+            "max_value": "50",
+            "default": "5",
+            "step": 1,
+            "parentToggle": "FinalBorderBlendEnableToggle",
+            "requiredToggleValue": True,
+            "help": "Adjust the intensity and thickness of the border seam blur.",
         },
         "OverallMaskBlendAmountSlider": {
             "level": 1,

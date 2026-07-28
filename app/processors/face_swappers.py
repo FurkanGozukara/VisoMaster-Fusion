@@ -10,11 +10,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.processors.models_processor import ModelsProcessor
+    from app.processors.workers.function_worker import FunctionWorker
 
 
 class FaceSwappers:
-    def __init__(self, models_processor: "ModelsProcessor"):
+    def __init__(
+        self,
+        models_processor: "ModelsProcessor",
+        function_worker: "FunctionWorker",
+    ):
         self.models_processor = models_processor
+        self.function_worker = function_worker
         self.current_swapper_model = None
         self.current_arcface_model = None
         # Sessions are unloaded and recreated frequently when Keep Models Alive is off.
@@ -153,7 +159,7 @@ class FaceSwappers:
     def run_recognize(
         self, img, kps, similarity_type="Auto", face_swapper_model="Inswapper128"
     ):
-        arcface_model = self.models_processor.get_arcface_model(face_swapper_model)
+        arcface_model = self.function_worker.get_arcface_model(face_swapper_model)
         return self.run_recognize_direct(img, kps, similarity_type, arcface_model)
 
     def recognize(self, arcface_model, img, face_kps, similarity_type=None):
@@ -372,11 +378,13 @@ class FaceSwappers:
 
         return embedding_id.numpy().flatten()
 
-    def calc_swapper_latent_cscs(self, source_embedding):
+    def calc_swapper_latent_cscs(self, source_embedding: np.ndarray) -> np.ndarray:
         latent = source_embedding.reshape((1, -1))
         return latent
 
-    def run_swapper_cscs(self, image, embedding, output):
+    def run_swapper_cscs(
+        self, image: torch.Tensor, embedding: torch.Tensor, output: torch.Tensor
+    ) -> None:
         model_name = "CSCS"
         model = self._load_swapper_model(model_name)
         if not model:
@@ -425,7 +433,7 @@ class FaceSwappers:
 
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
-    def _calc_emap_latent(self, source_embedding):
+    def _calc_emap_latent(self, source_embedding: np.ndarray) -> np.ndarray:
         """FS-PERF-05: shared emap-based latent computation extracted from
         calc_inswapper_latent and calc_swapper_latent_iss."""
         n_e = source_embedding / l2norm(source_embedding)
@@ -434,7 +442,7 @@ class FaceSwappers:
         latent /= np.linalg.norm(latent)
         return latent
 
-    def _ensure_emap(self):
+    def _ensure_emap(self) -> bool:
         """Ensures emap is loaded; returns True if available, False otherwise."""
         if (
             not hasattr(self.models_processor, "emap")
@@ -449,7 +457,7 @@ class FaceSwappers:
             and self.models_processor.emap.size > 0
         )
 
-    def calc_inswapper_latent(self, source_embedding):
+    def calc_inswapper_latent(self, source_embedding: np.ndarray) -> np.ndarray | None:
         if not self._ensure_emap():
             print("[ERROR] Emap could not be loaded for latent calculation.")
             # FS-ROBUST-01: return None so callers can detect and handle the failure
@@ -457,7 +465,9 @@ class FaceSwappers:
 
         return self._calc_emap_latent(source_embedding)
 
-    def run_inswapper(self, image, embedding, output):
+    def run_inswapper(
+        self, image: torch.Tensor, embedding: torch.Tensor, output: torch.Tensor
+    ) -> None:
         model_name = "Inswapper128"
 
         # ORT-based inference
@@ -559,12 +569,14 @@ class FaceSwappers:
             self._run_model_with_lazy_build_check(model_name, model, io_binding)
             output[idx].copy_(out[0])
 
-    def calc_swapper_latent_ghost(self, source_embedding):
+    def calc_swapper_latent_ghost(self, source_embedding: np.ndarray) -> np.ndarray:
         latent = source_embedding.reshape((1, -1))
 
         return latent
 
-    def calc_swapper_latent_iss(self, source_embedding, version="A"):
+    def calc_swapper_latent_iss(
+        self, source_embedding: np.ndarray, version: str = "A"
+    ) -> np.ndarray:
         # FS-PERF-05: reuse shared _ensure_emap / _calc_emap_latent helpers
         if not self._ensure_emap():
             print("[ERROR] Emap could not be loaded for latent calculation.")
@@ -573,7 +585,13 @@ class FaceSwappers:
 
         return self._calc_emap_latent(source_embedding)
 
-    def run_iss_swapper(self, image, embedding, output, version="A"):
+    def run_iss_swapper(
+        self,
+        image: torch.Tensor,
+        embedding: torch.Tensor,
+        output: torch.Tensor,
+        version: str = "A",
+    ) -> None:
         model_name = f"InStyleSwapper256 Version {version}"
         model = self._load_swapper_model(model_name)
         if not model:
@@ -609,13 +627,17 @@ class FaceSwappers:
         # Run the model with lazy build handling
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
-    def calc_swapper_latent_simswap512(self, source_embedding):
+    def calc_swapper_latent_simswap512(
+        self, source_embedding: np.ndarray
+    ) -> np.ndarray:
         latent = source_embedding.reshape(1, -1)
         # latent /= np.linalg.norm(latent)
         latent = latent / np.linalg.norm(latent, axis=1, keepdims=True)
         return latent
 
-    def run_swapper_simswap512(self, image, embedding, output):
+    def run_swapper_simswap512(
+        self, image: torch.Tensor, embedding: torch.Tensor, output: torch.Tensor
+    ) -> None:
         model_name = "SimSwap512"
         model = self._load_swapper_model(model_name)
         if not model:
@@ -652,8 +674,12 @@ class FaceSwappers:
         self._run_model_with_lazy_build_check(model_name, model, io_binding)
 
     def run_swapper_ghostface(
-        self, image, embedding, output, swapper_model="GhostFace-v2"
-    ):
+        self,
+        image: torch.Tensor,
+        embedding: torch.Tensor,
+        output: torch.Tensor,
+        swapper_model: str = "GhostFace-v2",
+    ) -> None:
         model_name = None
         if swapper_model == "GhostFace-v1":
             model_name = "GhostFacev1"
