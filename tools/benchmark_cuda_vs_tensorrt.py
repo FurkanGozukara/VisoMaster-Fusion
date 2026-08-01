@@ -115,7 +115,7 @@ def _build_target_face(main_window, source_path: Path, video_path: Path):
             .to(main_window.models_processor.device)
             .permute(2, 0, 1)
         )
-        bboxes, kpss_5, _ = main_window.models_processor.run_detect(
+        bboxes, kpss_5, _ = main_window.function_worker.run_detect(
             image_tensor,
             control["DetectorModelSelection"],
             max_num=int(control["MaxFacesToDetectSlider"]),
@@ -136,7 +136,7 @@ def _build_target_face(main_window, source_path: Path, video_path: Path):
                 * (bboxes[index][3] - bboxes[index][1])
             ),
         )
-        embedding, crop_rgb = main_window.models_processor.run_recognize_direct(
+        embedding, crop_rgb = main_window.function_worker.run_recognize_direct(
             image_tensor,
             kpss_5[largest_index],
             "Auto",
@@ -178,7 +178,7 @@ def _build_target_face(main_window, source_path: Path, video_path: Path):
     )
     target_face = main_window.target_faces[face_id]
     swap_model = str(main_window.parameters[face_id]["SwapModelSelection"])
-    arcface_model = main_window.models_processor.get_arcface_model(swap_model)
+    arcface_model = main_window.function_worker.get_arcface_model(swap_model)
     target_face.assigned_input_embedding[arcface_model] = source_embedding
     main_window.swapfacesButton.setChecked(True)
     main_window.editFacesButton.setChecked(False)
@@ -234,7 +234,7 @@ def run_worker(args: argparse.Namespace) -> dict:
     app_idle_gpu_mb = query_gpu_used_mb(args.gpu_id)
 
     setup_started = time.perf_counter()
-    resolved_provider = main_window.models_processor.switch_providers_priority(
+    resolved_provider = main_window.function_worker.switch_providers_priority(
         args.provider
     )
     main_window.control["ProvidersPrioritySelection"] = resolved_provider

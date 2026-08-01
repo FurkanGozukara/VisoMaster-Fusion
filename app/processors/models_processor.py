@@ -132,12 +132,14 @@ def _probe_onnx_model_worker(
 
 class ModelsProcessor(QtCore.QObject):
     """
-    Central hub for managing AI models (ONNX, TensorRT, PyTorch).
+    Central resource manager for AI models (ONNX, TensorRT, PyTorch).
     Handles:
     - Model Loading/Unloading (Thread-safe)
     - TensorRT Engine compilation and caching
-    - Inference wrapper methods for various tasks (detection, swapping, restoration)
     - GPU memory management
+
+    Inference routing belongs to FunctionWorker; callers should not invoke inference
+    methods through ModelsProcessor.
     """
 
     processing_complete = QtCore.Signal()

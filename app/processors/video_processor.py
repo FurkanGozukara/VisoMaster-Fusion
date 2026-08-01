@@ -3104,7 +3104,7 @@ class VideoProcessor(QObject):
             ],
             dtype=numpy.float32,
         )
-        embedding, _ = self.main_window.models_processor.run_recognize_direct(
+        embedding, _ = self.main_window.function_worker.run_recognize_direct(
             image_tensor,
             approximate_kps,
             "Auto",
@@ -3239,7 +3239,7 @@ class VideoProcessor(QObject):
                             expand=True,
                         )
 
-                    bboxes, kpss_5, _ = self.main_window.models_processor.run_detect(
+                    bboxes, kpss_5, _ = self.main_window.function_worker.run_detect(
                         frame_tensor,
                         control.get("DetectorModelSelection", "RetinaFace"),
                         max_num=int(control.get("MaxFacesToDetectSlider", 20)),
@@ -3277,7 +3277,7 @@ class VideoProcessor(QObject):
                         ):
                             continue
                         embedding, cropped_rgb = (
-                            self.main_window.models_processor.run_recognize_direct(
+                            self.main_window.function_worker.run_recognize_direct(
                                 frame_tensor,
                                 face_kps,
                                 "Auto",

@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.processors.models_processor import ModelsProcessor
+from app.processors.workers.function_worker import FunctionWorker
 
 
 class _Signal:
@@ -59,7 +60,9 @@ def main() -> int:
         fixed_unet_model_name="RefLDM_UNET_EXTERNAL_KV",
     )
     processor = ModelsProcessor(window)
-    resolved_provider = processor.switch_providers_priority(args.provider)
+    function_worker = FunctionWorker(processor)
+    window.function_worker = function_worker
+    resolved_provider = function_worker.switch_providers_priority(args.provider)
 
     image_path = Path(__file__).resolve().parents[2] / "Example_Face_Video" / "face1.jpg"
     bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
@@ -74,7 +77,7 @@ def main() -> int:
     )
 
     started = time.perf_counter()
-    boxes, landmarks, _ = processor.run_detect(
+    boxes, landmarks, _ = function_worker.run_detect(
         image,
         detect_mode="Yunet",
         max_num=1,

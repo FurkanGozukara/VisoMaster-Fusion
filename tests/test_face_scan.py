@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -10,6 +11,18 @@ from app.processors.video_utils.face_scan import (
 
 
 class FaceScanTests(unittest.TestCase):
+    def test_video_processor_routes_inference_through_function_worker(self):
+        video_processor_path = (
+            Path(__file__).resolve().parents[1]
+            / "app"
+            / "processors"
+            / "video_processor.py"
+        )
+        source = video_processor_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("models_processor.run_detect(", source)
+        self.assertNotIn("models_processor.run_recognize_direct(", source)
+
     def test_smart_scan_samples_complete_clip_including_last_frame(self):
         frames = build_face_scan_frame_numbers(
             frame_count=240,
