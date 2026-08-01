@@ -663,7 +663,7 @@ class LauncherWindow(QtWidgets.QWidget):
     def on_update_models(self):
         print("[Launcher] Running model downloader...")
         with with_busy_state(self, busy=True, text="Updating models..."):
-            run_python(PATHS["DOWNLOAD_PY"])
+            run_python(PATHS["DOWNLOAD_PY"], cwd=PATHS["BASE_DIR"])
             try:
                 write_checksum_state(models_sha=compute_models_sha256(models_list))
             except Exception as e:
@@ -742,7 +742,7 @@ class LauncherWindow(QtWidgets.QWidget):
             print("[Launcher] Set USE_OPTIMIZED_MODELS=false in portable.cfg.")
 
             print("[Launcher] Re-downloading original models...")
-            run_python(PATHS["DOWNLOAD_PY"])
+            run_python(PATHS["DOWNLOAD_PY"], cwd=PATHS["BASE_DIR"])
 
             try:
                 write_checksum_state(models_sha=compute_models_sha256(models_list))

@@ -32,15 +32,19 @@ def resolve_paths():
         "BASE_DIR": base_dir,
         "PORTABLE_DIR": portable_dir,
         "APP_DIR": repo_dir,
-        "PYTHON_EXE": portable_dir / "python" / "python.exe",
+        # The interpreter every dependency lives in is the venv one, not the bare runtime
+        # under portable-files/python that Windows_Start_Portable.bat only uses as a base.
+        "PYTHON_EXE": portable_dir / "venv" / "Scripts" / "python.exe",
         "UV_EXE": portable_dir / "uv" / "uv.exe",
         "GIT_EXE": portable_dir / "git" / "bin" / "git.exe",
         "STYLES_DIR": app_dir / "ui" / "styles",
         "LOGO_PNG": app_dir / "ui" / "core" / "media" / "visomaster_logo.png",
         "SMALL_ICON": app_dir / "ui" / "core" / "media" / "visomaster_small.png",
-        "REQ_FILE": repo_dir / "requirements_cu13.txt",
+        # Both installers (Windows_Install_or_Update.bat and Windows_Start_Portable.bat) drive the
+        # requirements file and the model downloader that sit next to them in the package root.
+        "REQ_FILE": base_dir / "requirements.txt",
         "MAIN_PY": repo_dir / "main.py",
-        "DOWNLOAD_PY": repo_dir / "download_models.py",
+        "DOWNLOAD_PY": base_dir / "HF_model_downloader.py",
         "OPTIMIZE_PY": app_dir / "tools" / "optimize_models.py",
         "PORTABLE_CFG": base_dir / "portable.cfg",
     }
@@ -77,15 +81,17 @@ def apply_theme_to_app(app: QtWidgets.QApplication):
 # ---------- Subprocess Helpers ----------
 
 
-def run_python(script_path: Path, args: list | None = None):
+def run_python(script_path: Path, args: list | None = None, cwd: Path | None = None):
     """Run a Python script using the portable Python interpreter.
 
-    The working directory is always set to APP_DIR (the repo root) so that
+    The working directory defaults to APP_DIR (the repo root) so that
     `python -m app.ui.launcher` and similar module invocations find the `app/`
-    package regardless of where the caller's cwd is.
+    package regardless of where the caller's cwd is. Scripts that live in the
+    package root and resolve paths relative to it - HF_model_downloader.py builds
+    `VisoMaster-Fusion/model_assets` from the cwd - must pass cwd=BASE_DIR instead.
     """
     cmd = [str(PATHS["PYTHON_EXE"]), str(script_path)] + (args or [])
-    subprocess.run(cmd, cwd=str(PATHS["APP_DIR"]), shell=False)
+    subprocess.run(cmd, cwd=str(cwd or PATHS["APP_DIR"]), shell=False)
 
 
 # UV network tuning defaults.
@@ -111,6 +117,10 @@ def uv_pip_install():
     env.setdefault("UV_HTTP_TIMEOUT", _UV_HTTP_TIMEOUT)
     env.setdefault("UV_HTTP_RETRIES", _UV_HTTP_RETRIES)
     env.setdefault("UV_CONCURRENT_DOWNLOADS", _UV_CONCURRENT_DOWNLOADS)
+    # requirements.txt mixes a PyTorch extra index with pinned direct-URL wheels whose
+    # version tags are non-standard; both installers set these, so match them exactly.
+    env.setdefault("UV_SKIP_WHEEL_FILENAME_CHECK", "1")
+    env.setdefault("UV_LINK_MODE", "copy")
 
     return subprocess.run(
         [
@@ -121,6 +131,8 @@ def uv_pip_install():
             str(PATHS["REQ_FILE"]),
             "--python",
             str(PATHS["PYTHON_EXE"]),
+            "--index-strategy",
+            "unsafe-best-match",
         ],
         cwd=str(PATHS["APP_DIR"]),
         env=env,
